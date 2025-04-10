@@ -13,6 +13,7 @@ Currently the basic raytracing algorithm is implemented: a brickmap acceleration
 
 ### ToDo list:
 - Chunking
+- Fully modifiable terrain
 - PBR lighting
 - LOD, further chunks with lower voxel resolution
 - Proper Indirect lighting (denoise, temporal accumulation, etc...)
