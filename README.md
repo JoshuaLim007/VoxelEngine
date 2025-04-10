@@ -24,7 +24,7 @@ Currently the basic raytracing algorithm is implemented: a brickmap acceleration
 
 
 ### Screenshots:
-![Demo Screenshot](demo/voxelrender0.png)
+![Demo Screenshot](demo/voxelrender0.PNG)
 8k x 512 x 8k world size (no denoise)
-![Demo Screenshot](demo/voxelrender1.png)
+![Demo Screenshot](demo/voxelrender1.PNG)
 8k x 512 x 8k world size (no denoise)
