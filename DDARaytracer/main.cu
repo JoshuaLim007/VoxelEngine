@@ -39,7 +39,7 @@ int main()
 {
 	int factor = 32;
 	auto t0 = std::chrono::high_resolution_clock::now();
-	auto buffer = CreateVoxels(make_uint3(2048 * 4, 512, 2048 * 4));
+	auto buffer = CreateVoxels(make_uint3(4096, 512, 4096));
 	auto t1 = std::chrono::high_resolution_clock::now();
 	auto td = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
 	std::cout << "Voxel generation time: " << td << "ms" << std::endl;
@@ -66,18 +66,21 @@ int main()
 	raytracer->SetFactor(factor);
 
 	void* d_pixels;
-	float3 cam_pos = { 0, 0, 0 };
+	float3 cam_pos = { 2048, 512, 2048 };
 	float3 cam_up = { 0, 1, 0 };
 	float3 cam_right = { 1, 0, 0 };
 	float3 cam_forward = { 0, 0, 1 };
 	float3 cam_eular = { 0, 0, 0 };
 
 	Graphics::Environment env;
-	env.LightDirection = { 0, 1, 0};
+	env.LightDirection = { 1, 1, 1};
 	env.LightDirection = normalize(env.LightDirection);
-	env.LightColor = { 10, 10, 10 };
+	env.LightColor = { 2, 2, 2 };
 	env.AmbientColor = { 0.5f, 0.5f, 0.5f };
 	SetEnvironment(env);
+	SetFOV(90);
+	auto orthoWindowSize = make_float2(10, 10);
+	SetOrthoWindowSize(orthoWindowSize);
 
 	cudaMalloc(&d_pixels, 1920 * 1080 * sizeof(PixelData));
 	cudaMemset(d_pixels, 255, 1920 * 1080 * sizeof(PixelData));
@@ -98,20 +101,36 @@ int main()
 					clicking = false;
 				}
 			}
+
+			if (e.type == SDL_MOUSEWHEEL) {
+				if (e.wheel.y > 0) { // scroll up
+					orthoWindowSize.x -= 10;
+					orthoWindowSize.y -= 10;
+				} else if (e.wheel.y < 0) { // scroll down
+					orthoWindowSize.x += 10;
+					orthoWindowSize.y += 10;
+				}
+				SetOrthoWindowSize(orthoWindowSize);
+			}
+
 		}
 
-		float cam_speed = 0.05;
+		float cam_speed = 0.2;
 		const Uint8* currentKeyStates = SDL_GetKeyboardState(NULL);
 		//shift
 		if (currentKeyStates[SDL_SCANCODE_LSHIFT]) {
-			cam_speed *= 100;
+			cam_speed *= 10;
 		}
+
 		if (currentKeyStates[SDL_SCANCODE_W]) {
 			cam_pos += cam_forward * cam_speed;
 		}
 		if (currentKeyStates[SDL_SCANCODE_S]) {
 			cam_pos -= cam_forward * cam_speed;
 		}
+
+		SetOrthoWindowSize(orthoWindowSize);
+
 		if (currentKeyStates[SDL_SCANCODE_A]) {
 			cam_pos -= cam_right * cam_speed;
 		}

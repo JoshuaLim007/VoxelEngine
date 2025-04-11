@@ -9,6 +9,9 @@
 #include "helper_math.h"
 #include "DDA.cuh"
 
+//#define DEBUG_VIEW
+#define ORTHO
+
 #define CUDA_SAFE_CALL(x) { \
 	cudaError_t err = x; \
 	if (err != cudaSuccess) { \
@@ -36,6 +39,10 @@ namespace GPUDDA
 		__host__ __device__ void getDirections(float3 eularAngles, float3* forwad, float3* up, float3* right);
 
 		void SetEnvironment(const Environment &env);
+
+		void SetFOV(float fov);
+
+		void SetOrthoWindowSize(float2 windowSize);
 
 		void RaytraceScreen(
 			VoxelRaytracer3D* rt,

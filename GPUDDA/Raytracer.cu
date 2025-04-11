@@ -2,7 +2,21 @@
 #include "cuda_noise.cuh"
 using namespace GPUDDA;
 
-//#define DEBUG_VIEW
+struct RenderParams {
+	uint2 Resolution;
+	size_t FrameNumber;
+	float Fov;
+	float2 OrthoSize;
+	__device__ __host__ RenderParams(uint2 r, size_t n, float fov, float2 size) {
+		Resolution = r;
+		FrameNumber = n;
+		Fov = fov;
+		OrthoSize = size;
+	}
+	__device__ __host__ RenderParams() {}
+};
+__device__ RenderParams d_params;
+RenderParams h_params = RenderParams(make_uint2(0,0), 0, 90, make_float2(10,10));
 
 __host__ __device__ void Graphics::getDirections(float3 eularAngles, float3* forwad, float3* up, float3* right)
 {
@@ -37,6 +51,23 @@ __device__ float3 getRayDirection(float3 fwd, float3 up, float3 right, uint2 scr
 	return ray_dir;
 }
 
+__device__ void getRayDirectionOrtho(
+	float3 fwd, 
+	float3 up, 
+	float3 right, 
+	float2 uv, 
+	float2 screen_size,
+	float3 origin,
+	float3& out_rayDir,
+	float3& out_rayOrigin) {
+
+	float ratio = static_cast<float>(d_params.Resolution.x) / d_params.Resolution.y;
+	out_rayDir = fwd;
+	out_rayOrigin = origin;
+	out_rayOrigin += right * (uv.x * 2 - 1) * screen_size.x * ratio;
+	out_rayOrigin += up * (uv.y * 2 - 1) * screen_size.y;
+}
+
 template<typename T>
 __device__ void setPixelColor(void* screen_texture, uint32_t screen_width, uint32_t screen_height, int x, int y, float3 color) {
 	T* pixels = (T*)screen_texture;
@@ -54,8 +85,6 @@ __device__ void setPixelColor(void* screen_texture, uint32_t screen_width, uint3
 }
 
 __device__ Graphics::Environment g_env;
-__device__ size_t g_frame;
-
 __device__ float3 calculateColor(float3 camPos, float3 normal, float3 position,
 	VoxelBuffer<3>* chunks,
 	VoxelBuffer<3>* chunksData,
@@ -89,13 +118,13 @@ __device__ float3 calculateColor(float3 camPos, float3 normal, float3 position,
 
 	//Ambient Occlusion
 	if (lDot == 0) {
-		int samples = 1;
+		constexpr int samples = 8;
 		int x = blockIdx.x * blockDim.x + threadIdx.x;
 		int y = blockIdx.y * blockDim.y + threadIdx.y;
 		int seed = y * 1920 + x;
 		float occlusion = 0.0f;
 		for (int i = 0; i < samples; i++) {
-			int si = seed + i * 1000 + (g_frame + 1) * 1000;
+			int si = seed + i * 1000 + (d_params.FrameNumber + 1) * 1000;
 			float3 sampleDir = make_float3(
 				cudaNoise::randomFloat(si) * 2 - 1,
 				cudaNoise::randomFloat(si * 10) * 2 - 1,
@@ -107,7 +136,7 @@ __device__ float3 calculateColor(float3 camPos, float3 normal, float3 position,
 
 			float3 samplePos = position + sampleDir * 0.01f;
 			float3 sampleNormal;
-			bool hit = raytrace(32, samplePos, sampleDir, chunks[0], chunksData, chunkBoundingBoxes, factor, steps, sampleNormal, samplePos);
+			bool hit = raytrace(8, samplePos, sampleDir, chunks[0], chunksData, chunkBoundingBoxes, factor, steps, sampleNormal, samplePos);
 			if (hit) {
 				float dist = length(samplePos - position);
 				float occlusion = 1 - fminf(1 / (dist * 10.0f), 1.0f);
@@ -150,7 +179,12 @@ __global__ void screenDispatch(
 	int y = blockIdx.y * blockDim.y + threadIdx.y;
 	if (x < screen_width && y < screen_height) {
 		float2 uv = make_float2(x / (float)screen_width, y / (float)screen_height);
-		auto ray_dir = getRayDirection(camera_fwd, camera_up, camera_right, make_uint2(screen_width, screen_height), make_float3(uv.x, uv.y, 0), 90);
+#ifdef ORTHO
+		float3 ray_dir;
+		getRayDirectionOrtho(camera_fwd, camera_up, camera_right, uv, d_params.OrthoSize, origin, ray_dir, origin);
+#else
+		auto ray_dir = getRayDirection(camera_fwd, camera_up, camera_right, make_uint2(screen_width, screen_height), make_float3(uv.x, uv.y, 0), d_params.Fov);
+#endif
 		int steps;
 		float3 normal;
 		float3 hitPos;
@@ -218,6 +252,14 @@ void Graphics::SetEnvironment(const Environment& env_v) {
 	}
 }
 
+void Graphics::SetFOV(float fov) {
+	h_params.Fov = fov;
+}
+
+void Graphics::SetOrthoWindowSize(float2 size) {
+	h_params.OrthoSize = size;
+}
+
 void Graphics::RaytraceScreen(
 	VoxelRaytracer3D* rt,
 	uint32_t screen_width,
@@ -236,9 +278,9 @@ void Graphics::RaytraceScreen(
 	auto bufferData = rt->GetVoxelBufferDatas();
 	auto factor = rt->GetFactor();
 	
-	static size_t frame = 0;
-	cudaMemcpyToSymbol(g_frame, &frame, sizeof(size_t));
-	frame++;
+	h_params.Resolution = make_uint2(screen_width, screen_height);
+	cudaMemcpyToSymbol(d_params, &h_params, sizeof(RenderParams));
+	h_params.FrameNumber++;
 
 	screenDispatch << < numBlocks, blockSize >> > (
 		origin, camera_fwd, camera_up, camera_right,
