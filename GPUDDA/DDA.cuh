@@ -14,7 +14,7 @@
 #include <thread>
 #include <mutex>
 
-constexpr auto FLT_EPS_DDA = 1e-4;
+constexpr auto FLT_EPS_DDA = 1e-6;
 constexpr auto FLT_INF = std::numeric_limits<float>::infinity();
 constexpr auto FLT_EPS = std::numeric_limits<float>::epsilon();
 
@@ -92,6 +92,7 @@ namespace GPUDDA {
 		int max_steps;
 		Bounds<T>* per_voxel_bounds;
 		int per_voxel_bounds_scale;
+		bool takeInitialStep;
 
 		__device__ __host__ static DDARayParams Default(
 			const GPUDDA::VoxelBuffer<N>& buffer,
@@ -106,6 +107,7 @@ namespace GPUDDA {
 			Params.max_steps = MAX_STEPS;
 			Params.per_voxel_bounds = nullptr;
 			Params.per_voxel_bounds_scale = 0;
+			Params.takeInitialStep = false;
 			return Params;
 		}
 	};
@@ -116,6 +118,8 @@ namespace GPUDDA {
 		bool isOutOfBounds;
 		T HitCell;
 		T HitIntersectedPoint;
+		T NextInterSectedPoint;
+		T NextCell;
 		T HitNormal;
 		int stepsTaken;
 	};

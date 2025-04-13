@@ -118,7 +118,7 @@ __device__ float3 calculateColor(float3 camPos, float3 normal, float3 position,
 
 	//Ambient Occlusion
 	if (lDot == 0) {
-		constexpr int samples = 8;
+		constexpr int samples = 0;
 		int x = blockIdx.x * blockDim.x + threadIdx.x;
 		int y = blockIdx.y * blockDim.y + threadIdx.y;
 		int seed = y * 1920 + x;
@@ -134,7 +134,7 @@ __device__ float3 calculateColor(float3 camPos, float3 normal, float3 position,
 				sampleDir = reflect(sampleDir, normal);
 			}
 
-			float3 samplePos = position + sampleDir * 0.01f;
+			float3 samplePos = position + normal * 0.01f;
 			float3 sampleNormal;
 			bool hit = raytrace(8, samplePos, sampleDir, chunks[0], chunksData, chunkBoundingBoxes, factor, steps, sampleNormal, samplePos);
 			if (hit) {
@@ -146,7 +146,14 @@ __device__ float3 calculateColor(float3 camPos, float3 normal, float3 position,
 				occlusion += 1.0f;
 			}
 		}
-		occlusion /= samples;
+		
+		if (samples > 0) {
+			occlusion /= samples;
+		}
+		else {
+			occlusion = 1.0f;
+		}
+
 		color *= occlusion;
 	}
 
@@ -230,6 +237,15 @@ __global__ void screenDispatch(
 		else {
 			setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(ray_dir.x, ray_dir.y, ray_dir.z));
 		}
+
+		//if center of screen
+		auto tx = threadIdx.x + blockIdx.x * blockDim.x;
+		auto ty = threadIdx.y + blockIdx.y * blockDim.y;
+		if (tx == 1920 >> 1 && ty == 1080 >> 1) {
+			float3 color = make_float3(10, 10, 10);
+			setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(color.x, color.y, color.z));
+		}
+
 #ifdef DEBUG_VIEW
 		//if (x < screen_width >> 1 && y > screen_height >> 1) {
 		//	setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(steps / 256.0f, 0, 0));

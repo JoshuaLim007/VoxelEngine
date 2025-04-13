@@ -44,7 +44,7 @@ __global__ void PopulateVoxels(BitArray voxels, uint3 size) {
 			float t = PerlinNoise(fx, fy, fz) * 250;
 			t += 100;
 			t = fmaxf(t, 0);
-			bool isAir = y + 1.5f > t;
+			bool isAir = t < 0.1f;
 			if (isAir) {
 				nextToAir = true;
 				break;
@@ -62,7 +62,7 @@ __global__ void PopulateVoxels(BitArray voxels, uint3 size) {
 			float t = PerlinNoise(fx, fy, fz) * 250;
 			t += 100;
 			t = fmaxf(t, 0);
-			if (y > t) {
+			if (t < 0.1f) {
 				voxels[idx + i] = (0);
 			}
 			else {

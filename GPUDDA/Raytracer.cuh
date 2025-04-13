@@ -10,7 +10,7 @@
 #include "DDA.cuh"
 
 //#define DEBUG_VIEW
-#define ORTHO
+//#define ORTHO
 
 #define CUDA_SAFE_CALL(x) { \
 	cudaError_t err = x; \

@@ -39,7 +39,7 @@ int main()
 {
 	int factor = 32;
 	auto t0 = std::chrono::high_resolution_clock::now();
-	auto buffer = CreateVoxels(make_uint3(4096, 512, 4096));
+	auto buffer = CreateVoxels(make_uint3(512, 512, 512));
 	auto t1 = std::chrono::high_resolution_clock::now();
 	auto td = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
 	std::cout << "Voxel generation time: " << td << "ms" << std::endl;
@@ -55,6 +55,7 @@ int main()
 	if (!renderer.init(1920, 1080)) {
 		return 1;
 	}
+
 	VoxelRaytracer3D* raytracer = new GPUDDA::VoxelRaytracer3D(1);
 	auto low_res_buffer = std::get<0>(buffers);
 	auto low_res_grid_data = std::get<1>(buffers);
@@ -66,7 +67,7 @@ int main()
 	raytracer->SetFactor(factor);
 
 	void* d_pixels;
-	float3 cam_pos = { 2048, 512, 2048 };
+	float3 cam_pos = { 0, 0, 0 };
 	float3 cam_up = { 0, 1, 0 };
 	float3 cam_right = { 1, 0, 0 };
 	float3 cam_forward = { 0, 0, 1 };
