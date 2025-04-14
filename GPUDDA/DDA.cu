@@ -602,7 +602,7 @@ namespace GPUDDA {
             float intersect_x = 0;
             float intersect_y = 0;
             float intersect_z = 0;
-            if (tMax_x <= tMax_y && tMax_x <= tMax_z) {
+            if (tMax_x < tMax_y && tMax_x < tMax_z) {
                 intersect_x = cell_x + (step_x > 0);
                 intersect_y = y + (tMax_x * dy);
                 intersect_z = z + (tMax_x * dz);
@@ -611,7 +611,7 @@ namespace GPUDDA {
                 if (!exit) 
                     Results.HitNormal = make_float3(step_x, 0, 0);
             }
-            else if (tMax_y <= tMax_x && tMax_y <= tMax_z) {
+            else if (tMax_y <= tMax_x && tMax_y < tMax_z) {
                 intersect_x = x + (tMax_y * dx);
                 intersect_y = cell_y + (step_y > 0);
                 intersect_z = z + (tMax_y * dz);
@@ -665,12 +665,23 @@ namespace GPUDDA {
         int total_steps = 0;
         //in chunk space
         float3 start = origin;
+
+        //prevent starting on a chunk border
+        if (start.x == factor) {
+            start.x -= FLT_EPS_DDA;
+        }
+        if (start.y == factor) {
+            start.y -= FLT_EPS_DDA;
+        }
+        if (start.z == factor) {
+            start.z -= FLT_EPS_DDA;
+        }
+
         start.x /= factor;
         start.y /= factor;
         start.z /= factor;
         float3 direction = normalize(ray);
 		float3 start_normal = make_float3(0, 0, 0);
-
         if (!(start.x >= 0 && start.y >= 0 && start.z >= 0 && start.x < chunks.dimensions[0] && start.y < chunks.dimensions[1] && start.z < chunks.dimensions[2])) {
             float3 intersect;
             if (ray_intersects_aabb(
@@ -686,7 +697,7 @@ namespace GPUDDA {
 		out_normal = make_float3(0, 0, 0);
         float3 hitPosition = make_float3(0, 0, 0);
         bool hit = false;
-        bool takeInitialStep = false;
+        bool skipInitial = false;
 
         //if center of screen
         auto tx = threadIdx.x + blockIdx.x * blockDim.x;
@@ -694,18 +705,21 @@ namespace GPUDDA {
         while (total_steps < maxSteps) {
             float3 start_high_res;
             DDARayParams<float3, 3> params = DDARayParams<float3, 3>::Default(chunks, start, direction);
-            params.takeInitialStep = takeInitialStep;
+            params.takeInitialStep = skipInitial;
             params.per_voxel_bounds = chunkBoundingBoxes;
             params.per_voxel_bounds_scale = factor;
             DDARayResults<float3> results;
             dda_ray_traversal(params, results);
-            takeInitialStep = false;
+            skipInitial = false;
+
             total_steps += results.stepsTaken;
             start_high_res = make_float3(results.HitIntersectedPoint.x * factor, results.HitIntersectedPoint.y * factor, results.HitIntersectedPoint.z * factor);
             hitPosition = start_high_res;
             if (results.hit && !results.isOutOfBounds) {
                 Bounds<float3> chunkBounds{};
-                if (previous_cell.x == results.HitCell.x && previous_cell.y == results.HitCell.y && previous_cell.z == results.HitCell.z) {
+                if (previous_cell.x == results.HitCell.x && 
+                    previous_cell.y == results.HitCell.y && 
+                    previous_cell.z == results.HitCell.z) {
                     break;
                 }
                 previous_cell = results.HitCell;
@@ -733,7 +747,11 @@ namespace GPUDDA {
                 );
                 
                 if (!results_hr.hit) {
-                    start = hitPosition;
+                    start = make_float3(
+                        results_hr.HitIntersectedPoint.x + results.HitCell.x * factor,
+                        results_hr.HitIntersectedPoint.y + results.HitCell.y * factor,
+                        results_hr.HitIntersectedPoint.z + results.HitCell.z * factor
+                    );
                     start.x /= factor;
                     start.y /= factor;
                     start.z /= factor;
@@ -743,8 +761,10 @@ namespace GPUDDA {
                         int cx = static_cast<int>(start.x);
                         int cy = static_cast<int>(start.y);
                         int cz = static_cast<int>(start.z);
-                        if (cx == results.HitCell.x && cy == results.HitCell.y && results.HitCell.z == cz) {
-                            takeInitialStep = true;
+                        if (cx == results.HitCell.x &&
+                            cy == results.HitCell.y &&
+                            cz == results.HitCell.z) {
+                            skipInitial = true;
                         }
                     }
                     continue;

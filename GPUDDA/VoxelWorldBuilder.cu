@@ -41,10 +41,9 @@ __global__ void PopulateVoxels(BitArray voxels, uint3 size) {
 			float fx = x * scale;
 			float fy = y * scale;
 			float fz = z * scale;
-			float t = PerlinNoise(fx, fy, fz) * 250;
-			t += 100;
+			float t = PerlinNoise(fx, fy, fz) * 1000;
 			t = fmaxf(t, 0);
-			bool isAir = t < 0.1f;
+			bool isAir = t > 0.9f;
 			if (isAir) {
 				nextToAir = true;
 				break;
@@ -59,10 +58,9 @@ __global__ void PopulateVoxels(BitArray voxels, uint3 size) {
 			float fx = x * scale;
 			float fy = y * scale;
 			float fz = z * scale;
-			float t = PerlinNoise(fx, fy, fz) * 250;
-			t += 100;
+			float t = PerlinNoise(fx, fy, fz) * 1000;
 			t = fmaxf(t, 0);
-			if (t < 0.1f) {
+			if (t > 0.999f) {
 				voxels[idx + i] = (0);
 			}
 			else {

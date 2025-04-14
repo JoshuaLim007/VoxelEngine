@@ -224,7 +224,7 @@ __global__ void screenDispatch(
 			//	setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(dist * 0.01f, 0, 0));
 			//}
 
-			setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(fmodf(dist, 1.0f),0,0));
+			//setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(fmodf(dist, 1.0f),0,0));
 
 #else
 			int color_steps = 0;
@@ -247,9 +247,7 @@ __global__ void screenDispatch(
 		}
 
 #ifdef DEBUG_VIEW
-		//if (x < screen_width >> 1 && y > screen_height >> 1) {
-		//	setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(steps / 256.0f, 0, 0));
-		//}
+		setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(steps / 256.0f, 0, 0));
 #endif
 	}
 }
