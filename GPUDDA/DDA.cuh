@@ -125,10 +125,14 @@ namespace GPUDDA {
 	};
 
 	__device__ bool ray_intersects_aabb(float2 start, float2 direction, float2 bmin, float2 bmax, float2* out_intersect, float2* out_normal);
-	__device__ bool ray_intersects_aabb(float3 start, float3 direction, float3 bmin, float3 bmax, float3* out_intersect, float3* out_normal);
+	__device__ bool ray_intersects_aabb(
+		const float3& start, 
+		const float3& direction, 
+		const float3& bmin, 
+		const float3& bmax, float3* out_intersect, float3* out_normal);
 
 	__device__ void dda_ray_traversal(
-		DDARayParams<float3, 3> Params,
+		const DDARayParams<float3, 3>& Params,
 		DDARayResults<float3>& Results
 	);
 

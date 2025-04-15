@@ -200,14 +200,29 @@ int main()
 		});
 
 	bool running = true;
+	double avgFrameTime = 0.0f;
 	while (running) {
 		auto t0 = std::chrono::high_resolution_clock::now();
 		running = renderer.render();
 		auto t1 = std::chrono::high_resolution_clock::now();
-		auto td = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+		auto td = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() / 1000.0;
+
+		avgFrameTime = avgFrameTime * (1 - (1 / 1000.0)) + td * (1 / 1000.0);
+
 		printf("Frame time: %dms\n", td);
+		printf("Avg Frame time: %dms\n", avgFrameTime);
+
 		auto fps = 1000.0f / td;
+		auto avgfps = 1000.0f / avgFrameTime;
 		std::cout << "FPS: " << fps << std::endl;
+		std::cout << "Avg FPS: " << avgfps << std::endl;
+
+		std::stringstream stream;
+		stream << "Avg FPS: " << avgfps << "\n";
+		std::string temp = stream.str();
+
+		auto window = renderer.GetWindow();
+		SDL_SetWindowTitle(window, temp.c_str());
 	}
 	cudaFree(d_pixels);
 	delete raytracer;

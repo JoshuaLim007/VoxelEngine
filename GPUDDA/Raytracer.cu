@@ -95,12 +95,12 @@ __device__ float3 calculateColor(float3 camPos, float3 normal, float3 position,
 
 	//shadow
 	float3 shadowRay = normalize(g_env.LightDirection);
-	float3 shadowPos = position + g_env.LightDirection * 0.01f;
+	float3 shadowPos = position + shadowRay * 0.01f;
+
 	float3 shadowNormal;
 	int steps;
 	bool hit = raytrace(MAX_STEPS, shadowPos, shadowRay, chunks[0], chunksData, chunkBoundingBoxes, factor, steps, shadowNormal, shadowPos);
 	out_steps += steps;
-
 	float lDot = fmaxf(dot(normal, g_env.LightDirection), 0) * (hit ? 0 : 1);
 	float3 diffuse = lDot * g_env.LightColor;
 	float3 ambient = g_env.AmbientColor * lerp(0.25,1.0, dot(normal, make_float3(0, 1, 0)) * 0.5 + 0.5 );

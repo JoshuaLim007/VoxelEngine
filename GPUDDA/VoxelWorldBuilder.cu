@@ -23,12 +23,12 @@ __global__ void PopulateVoxels(BitArray voxels, uint3 size) {
 		float scale = 0.002;
 
 		float3 offsets[] = {
-			make_float3(1, 0, 0),
-			make_float3(0, 1, 0),
-			make_float3(0, 0, 1),
-			make_float3(-1, 0, 1),
-			make_float3(0, -1, 0),
-			make_float3(0, 0, -1)
+			make_float3(1.5f, 0, 0),
+			make_float3(0, 1.5f, 0),
+			make_float3(0, 0, 1.5f),
+			make_float3(-1.5f, 0, 1.5f),
+			make_float3(0, -1.5f, 0),
+			make_float3(0, 0, -1.5f)
 		};
 		bool nextToAir = false;
 		for (int j = 0; j < 6; j++) {
@@ -43,7 +43,8 @@ __global__ void PopulateVoxels(BitArray voxels, uint3 size) {
 			float fz = z * scale;
 			float t = PerlinNoise(fx, fy, fz) * 1000;
 			t = fmaxf(t, 0);
-			bool isAir = t > 0.9f;
+			t += 256;
+			bool isAir = y > t;
 			if (isAir) {
 				nextToAir = true;
 				break;
@@ -60,7 +61,8 @@ __global__ void PopulateVoxels(BitArray voxels, uint3 size) {
 			float fz = z * scale;
 			float t = PerlinNoise(fx, fy, fz) * 1000;
 			t = fmaxf(t, 0);
-			if (t > 0.999f) {
+			t += 256;
+			if (y > t) {
 				voxels[idx + i] = (0);
 			}
 			else {

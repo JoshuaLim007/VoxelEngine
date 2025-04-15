@@ -23,6 +23,7 @@ class Renderer {
 	int w = 0, h = 0;
 
 public:
+	inline SDL_Window* GetWindow() { return window; }
 	float texScale = 1.0f;
 	Renderer(std::string);
 	void AddRenderEventCallback(std::function<void(const CallbackData&)>);
