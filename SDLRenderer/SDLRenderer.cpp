@@ -12,8 +12,6 @@ bool Renderer::init(int width, int height) {
 	w = width;
 	h = height;
     int val = SDL_Init(SDL_INIT_VIDEO);
-
-
     // Create a window
     window = SDL_CreateWindow(
         title.c_str(),  // Window title
@@ -33,7 +31,15 @@ bool Renderer::init(int width, int height) {
 void Renderer::AddRenderEventCallback(std::function<void(const CallbackData&)> callback) {
 	callbacks.push_back(callback);
 }
+void Renderer::AddUpdateEventCallback(std::function<void(const CallbackData&)> callback) {
+    updateCallbacks.push_back(callback);
+}
 Renderer::~Renderer() {
+    close();
+    for (auto& thread : threads) {
+        thread.join();
+	}
+    threads.clear();
 	SDL_DestroyWindow(window);
 	SDL_DestroyRenderer(renderer);
 	SDL_DestroyTexture(tex);
@@ -42,22 +48,40 @@ Renderer::~Renderer() {
 void Renderer::close() {
     closing = true;
 }
-bool Renderer::render() {
-
+double Renderer::GetRenderFrameTime() {
+    return RenderFrameTime;
+}
+void RenderThread(Renderer* renderer) {
+    while (!renderer->closing) {
+        auto t0 = std::chrono::high_resolution_clock::now();
+        void* pixels;
+        int pitch = 0;
+        SDL_LockTexture(renderer->tex, NULL, &pixels, &pitch);
+        CallbackData data;
+        data.renderer = renderer;
+        data.pixels = reinterpret_cast<PixelData*>(pixels);
+        auto callbacks = renderer->callbacks;
+        for (auto& callback : callbacks) {
+			callback(data);
+        }
+        SDL_Rect destRect = { 0, 0, renderer->w, renderer->h };
+        SDL_UnlockTexture(renderer->tex);
+        SDL_RenderCopy(renderer->renderer, renderer->tex, NULL, &destRect);
+        SDL_RenderPresent(renderer->renderer);
+        auto t1 = std::chrono::high_resolution_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() / 1000.0f;
+        renderer->RenderFrameTime = elapsed;
+    }
+}
+bool Renderer::Tick() {
+    if (threads.size() == 0) {
+        threads.push_back(std::thread(RenderThread, this));
+    }
 	bool quit = false;
-    void* pixels;
-    int pitch = 0;
-    SDL_LockTexture(tex, NULL, &pixels, &pitch);
     CallbackData data;
     data.renderer = this;
-	data.pixels = reinterpret_cast<PixelData*>(pixels);
-	for (auto& callback : callbacks) {
+	for (auto& callback : updateCallbacks) {
 		callback(data);
 	}
-    SDL_UnlockTexture(tex);
-    SDL_Rect destRect = { 0, 0, w, h };
-    SDL_RenderCopy(renderer, tex, NULL, &destRect);
-    SDL_RenderPresent(renderer);
-
     return !closing;
 }

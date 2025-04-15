@@ -2,6 +2,7 @@
 #include <string>
 #include <SDL.h>
 #include <vector>
+#include <thread>
 #include <functional>
 #undef main
 
@@ -18,16 +19,21 @@ class Renderer {
 	std::string title{};
 	SDL_Window* window = nullptr;
 	SDL_Renderer* renderer = nullptr;
+	std::vector<std::thread> threads{};
 	SDL_Texture* tex = nullptr;
 	std::vector<std::function<void(const CallbackData&)>> callbacks;
+	std::vector<std::function<void(const CallbackData&)>> updateCallbacks;
 	int w = 0, h = 0;
-
+	double RenderFrameTime = 0.0;
 public:
+	friend void RenderThread(Renderer*);
 	float texScale = 1.0f;
 	Renderer(std::string);
+	double GetRenderFrameTime();
 	void AddRenderEventCallback(std::function<void(const CallbackData&)>);
+	void AddUpdateEventCallback(std::function<void(const CallbackData&)>);
 	~Renderer();
 	bool init(int width, int height);
 	void close();
-	bool render();
+	bool Tick();
 };

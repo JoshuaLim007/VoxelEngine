@@ -8,6 +8,8 @@
 #include "../GPUDDA/VoxelWorldBuilder.cuh"
 #include <fstream>
 #include <sstream>
+#include <C:\SDL2-devel-2.30.9-VC\SDL2-2.30.9\include\SDL.h>
+
 #define SWIDTH 1280
 #define SHEIGHT 720
 
@@ -37,12 +39,13 @@ VoxelBuffer<3> CreateVoxels(uint3 size) {
 
 	return voxels;
 }
+
 int main()
 {
 	//TODO: goal, 128k x 512 x 128k
 	int targetRatio = 32;
 	auto t0 = std::chrono::high_resolution_clock::now();
-	auto buffer = CreateVoxels(make_uint3(512, 512, 512));
+	auto buffer = CreateVoxels(make_uint3(2048, 512, 2048));
 	int factor = 512 / targetRatio;
 	auto t1 = std::chrono::high_resolution_clock::now();
 	auto td = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
@@ -90,7 +93,9 @@ int main()
 	cudaMalloc(&d_pixels, SWIDTH * SHEIGHT * sizeof(PixelData));
 	cudaMemset(d_pixels, 255, SWIDTH * SHEIGHT * sizeof(PixelData));
 	bool clicking = false;
-	renderer.AddRenderEventCallback([&](const CallbackData& data) {
+	renderer.AddUpdateEventCallback([&](const CallbackData& data) {
+		auto inputT0 = std::chrono::high_resolution_clock::now();
+
 		SDL_Event e;
 		while (SDL_PollEvent(&e)) {
 			if (e.type == SDL_QUIT) {
@@ -106,12 +111,12 @@ int main()
 					clicking = false;
 				}
 			}
-
 			if (e.type == SDL_MOUSEWHEEL) {
 				if (e.wheel.y > 0) { // scroll up
 					orthoWindowSize.x -= 10;
 					orthoWindowSize.y -= 10;
-				} else if (e.wheel.y < 0) { // scroll down
+				}
+				else if (e.wheel.y < 0) { // scroll down
 					orthoWindowSize.x += 10;
 					orthoWindowSize.y += 10;
 				}
@@ -126,7 +131,6 @@ int main()
 		if (currentKeyStates[SDL_SCANCODE_LSHIFT]) {
 			cam_speed *= 10;
 		}
-
 		if (currentKeyStates[SDL_SCANCODE_W]) {
 			cam_pos += cam_forward * cam_speed;
 		}
@@ -148,7 +152,6 @@ int main()
 		if (currentKeyStates[SDL_SCANCODE_E]) {
 			cam_pos += cam_up * cam_speed;
 		}
-
 		if (currentKeyStates[SDL_SCANCODE_R]) {
 			//read from text file 
 			std::fstream file("C:\\Users\\joshu\\Desktop\\camData.txt", std::ios::in);
@@ -173,14 +176,10 @@ int main()
 			std::getline(iss2, token, ',');
 			cam_pos.z = std::stof(token);
 			file.close();
-
-			//cam_pos = { 138.252, 101.042, 503.197 };
-			//cam_eular = { -0.522997, 0.512, 0 };
 		}
 
 		std::cout << "Cam pos: " << cam_pos.x << ", " << cam_pos.y << ", " << cam_pos.z << std::endl;
 		std::cout << "Cam eular: " << cam_eular.x << ", " << cam_eular.y << ", " << cam_eular.z << std::endl;
-
 
 		static int last_x = 0, last_y = 0;
 		int x, y;
@@ -195,22 +194,24 @@ int main()
 		last_x = x;
 		last_y = y;
 
-		std::cout << "Cam Forward: " << cam_forward.x << ", " << cam_forward.y << ", " << cam_forward.z << std::endl;
-
+		auto inputT1 = std::chrono::high_resolution_clock::now();
+		auto inputTd = std::chrono::duration_cast<std::chrono::microseconds>(inputT1 - inputT0).count() / 1000.0f;
 		getDirections(cam_eular, &cam_forward, &cam_up, &cam_right);
+		printf("Input time: %fms\n", inputTd);
+	});
+
+	renderer.AddRenderEventCallback([&](const CallbackData& data) {
 		RaytraceScreen(raytracer, SWIDTH, SHEIGHT, d_pixels, cam_pos, cam_forward, cam_up, cam_right);
 		cudaMemcpy(data.pixels, d_pixels, SWIDTH * SHEIGHT * sizeof(PixelData), cudaMemcpyDeviceToHost);
-		});
+	});
 
 	bool running = true;
 	while (running) {
-		auto t0 = std::chrono::high_resolution_clock::now();
-		running = renderer.render();
-		auto t1 = std::chrono::high_resolution_clock::now();
-		auto td = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() / 1000.0f;
-		printf("Frame time: %fms\n", td);
-		auto fps = 1000.0f / td;
-		std::cout << "FPS: " << fps << std::endl;
+		running = renderer.Tick();
+		auto rT = renderer.GetRenderFrameTime();
+		printf("Render frame time: %fms\n", rT);
+		auto fps = 1000.0f / rT;
+		std::cout << "Render FPS: " << fps << std::endl;
 	}
 	cudaFree(d_pixels);
 	delete raytracer;

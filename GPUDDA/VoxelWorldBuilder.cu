@@ -69,7 +69,7 @@ __global__ void PopulateVoxels(BitArray voxels, uint3 size) {
 
 			float3 sphereCenter = make_float3(tx, ty, tz);
 			float dist = length(make_float3(x, y, z) - sphereCenter);
-			if (dist > sphereSize.x / 4.0f) {
+			if (dist > fminf(fminf(sphereSize.x, sphereSize.y), sphereSize.z) / 4.0f) {
 				nextToAir = true;
 				break;
 			}
@@ -107,14 +107,13 @@ __global__ void PopulateVoxels(BitArray voxels, uint3 size) {
 			float tz = floorf(fz / sphereSize.z) * sphereSize.z + (sphereSize.z / 2.0f);
 
 			float3 sphereCenter = make_float3(tx, ty, tz);
-			float dist = length(make_float3(x,y,z) - sphereCenter);
-			if (dist > sphereSize.x / 4.0f) {
+			float dist = length(make_float3(x, y, z) - sphereCenter);
+			if (dist > fminf(fminf(sphereSize.x, sphereSize.y), sphereSize.z) / 4.0f) {
 				voxels[idx + i] = (0);
 			}
 			else {
 				voxels[idx + i] = (1);
 			}
-
 		}
 		else {
 			voxels[idx + i] = (0);
