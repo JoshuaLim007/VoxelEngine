@@ -8,6 +8,8 @@
 #include "../GPUDDA/VoxelWorldBuilder.cuh"
 #include <fstream>
 #include <sstream>
+#define SWIDTH 1280
+#define SHEIGHT 720
 
 using namespace GPUDDA::Graphics;
 using namespace GPUDDA;
@@ -21,7 +23,7 @@ VoxelBuffer<3> CreateVoxels(uint3 size) {
 	voxels.grid = BitArray(buffer_size);
 
 	BitArray temp = BitArray(buffer_size, true);
-	auto threads = dim3(8, 8, 8);
+	auto threads = dim3(16, 8, 8);
 	auto scaled_size = make_uint3(size.x, size.y, size.z);
 	auto dim = dim3(
 		(scaled_size.x / 8 + threads.x - 1) / threads.x, 
@@ -38,9 +40,10 @@ VoxelBuffer<3> CreateVoxels(uint3 size) {
 int main()
 {
 	//TODO: goal, 128k x 512 x 128k
-	int factor = 32;
+	int targetRatio = 32;
 	auto t0 = std::chrono::high_resolution_clock::now();
-	auto buffer = CreateVoxels(make_uint3(2048, 512, 2048));
+	auto buffer = CreateVoxels(make_uint3(512, 512, 512));
+	int factor = 512 / targetRatio;
 	auto t1 = std::chrono::high_resolution_clock::now();
 	auto td = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
 	std::cout << "Voxel generation time: " << td << "ms" << std::endl;
@@ -53,7 +56,7 @@ int main()
 
 	delete[] buffer.grid.raw();
 	Renderer renderer("SDL Window");
-	if (!renderer.init(1920, 1080)) {
+	if (!renderer.init(SWIDTH, SHEIGHT)) {
 		return 1;
 	}
 
@@ -68,7 +71,7 @@ int main()
 	raytracer->SetFactor(factor);
 
 	void* d_pixels;
-	float3 cam_pos = { 0, 0, 0 };
+	float3 cam_pos = { 256, 256, 256 };
 	float3 cam_up = { 0, 1, 0 };
 	float3 cam_right = { 1, 0, 0 };
 	float3 cam_forward = { 0, 0, 1 };
@@ -84,8 +87,8 @@ int main()
 	auto orthoWindowSize = make_float2(10, 10);
 	SetOrthoWindowSize(orthoWindowSize);
 
-	cudaMalloc(&d_pixels, 1920 * 1080 * sizeof(PixelData));
-	cudaMemset(d_pixels, 255, 1920 * 1080 * sizeof(PixelData));
+	cudaMalloc(&d_pixels, SWIDTH * SHEIGHT * sizeof(PixelData));
+	cudaMemset(d_pixels, 255, SWIDTH * SHEIGHT * sizeof(PixelData));
 	bool clicking = false;
 	renderer.AddRenderEventCallback([&](const CallbackData& data) {
 		SDL_Event e;
@@ -195,8 +198,8 @@ int main()
 		std::cout << "Cam Forward: " << cam_forward.x << ", " << cam_forward.y << ", " << cam_forward.z << std::endl;
 
 		getDirections(cam_eular, &cam_forward, &cam_up, &cam_right);
-		RaytraceScreen(raytracer, 1920, 1080, d_pixels, cam_pos, cam_forward, cam_up, cam_right);
-		cudaMemcpy(data.pixels, d_pixels, 1920 * 1080 * sizeof(PixelData), cudaMemcpyDeviceToHost);
+		RaytraceScreen(raytracer, SWIDTH, SHEIGHT, d_pixels, cam_pos, cam_forward, cam_up, cam_right);
+		cudaMemcpy(data.pixels, d_pixels, SWIDTH * SHEIGHT * sizeof(PixelData), cudaMemcpyDeviceToHost);
 		});
 
 	bool running = true;
@@ -204,8 +207,8 @@ int main()
 		auto t0 = std::chrono::high_resolution_clock::now();
 		running = renderer.render();
 		auto t1 = std::chrono::high_resolution_clock::now();
-		auto td = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
-		printf("Frame time: %dms\n", td);
+		auto td = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() / 1000.0f;
+		printf("Frame time: %fms\n", td);
 		auto fps = 1000.0f / td;
 		std::cout << "FPS: " << fps << std::endl;
 	}
