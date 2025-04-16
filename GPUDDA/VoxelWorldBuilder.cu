@@ -7,7 +7,7 @@ __device__ float PerlinNoise(float x, float y, float z) {
 	return noise;
 }
 
-__global__ void PopulateVoxels(BitArray voxels, uint3 size) {
+__global__ void PopulateVoxels(BitArray voxels, uint3 size, float3 originOffset) {
 	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	int y = blockIdx.y * blockDim.y + threadIdx.y;
 	int z = blockIdx.z * blockDim.z + threadIdx.z;
@@ -22,9 +22,9 @@ __global__ void PopulateVoxels(BitArray voxels, uint3 size) {
 			return;
 		}
 		float scale = 0.002;
-		int xSpheres = 8;
+		int xSpheres = size.x / size.y * 8;
 		int ySpheres = 8;
-		int zSpheres = 8;
+		int zSpheres = size.z / size.y * 8;
 
 		float3 offsets[] = {
 			make_float3(1, 0, 0),
@@ -44,9 +44,9 @@ __global__ void PopulateVoxels(BitArray voxels, uint3 size) {
 			z += offsets[j].z * 1.5f;
 
 #ifndef DEBUG
-			float fx = x * scale;
-			float fy = y * scale;
-			float fz = z * scale;
+			float fx = ((float)x + originOffset.x) * scale;
+			float fy = ((float)y + originOffset.y) * scale;
+			float fz = ((float)z + originOffset.z) * scale;
 			float t = PerlinNoise(fx, fy, fz) * 1000;
 			t = fmaxf(t, 0);
 			bool isAir = t > 0.9f;
@@ -57,9 +57,9 @@ __global__ void PopulateVoxels(BitArray voxels, uint3 size) {
 #endif
 
 
-			float fx = x;
-			float fy = y;
-			float fz = z;
+			float fx = (float)x + originOffset.x;
+			float fy = (float)y + originOffset.y;
+			float fz = (float)z + originOffset.z;
 
 			float3 sphereSize = make_float3((float)size.x / xSpheres, (float)size.y / ySpheres, (float)size.z / zSpheres);
 
@@ -68,7 +68,7 @@ __global__ void PopulateVoxels(BitArray voxels, uint3 size) {
 			float tz = floorf(fz / sphereSize.z) * sphereSize.z + (sphereSize.z / 2.0f);
 
 			float3 sphereCenter = make_float3(tx, ty, tz);
-			float dist = length(make_float3(x, y, z) - sphereCenter);
+			float dist = length(make_float3(fx, fy, fz) - sphereCenter);
 			if (dist > fminf(fminf(sphereSize.x, sphereSize.y), sphereSize.z) / 4.0f) {
 				nextToAir = true;
 				break;
@@ -82,9 +82,9 @@ __global__ void PopulateVoxels(BitArray voxels, uint3 size) {
 			int y = ((idx + i) / size.x) % size.y;
 			int z = (idx + i) / (size.x * size.y);
 #ifndef DEBUG
-			float fx = x * scale;
-			float fy = y * scale;
-			float fz = z * scale;
+			float fx = ((float)x + originOffset.x;) * scale;
+			float fy = ((float)y + originOffset.y;) * scale;
+			float fz = ((float)z + originOffset.z;) * scale;
 			float t = PerlinNoise(fx, fy, fz) * 1000;
 			t = fmaxf(t, 0);
 			if (t > 0.999f) {
@@ -96,9 +96,9 @@ __global__ void PopulateVoxels(BitArray voxels, uint3 size) {
 #endif
 
 
-			float fx = x;
-			float fy = y;
-			float fz = z;
+			float fx = (float)x + originOffset.x;
+			float fy = (float)y + originOffset.y;
+			float fz = (float)z + originOffset.z;
 
 			float3 sphereSize = make_float3((float)size.x / xSpheres, (float)size.y / ySpheres, (float)size.z / zSpheres);
 
@@ -107,7 +107,7 @@ __global__ void PopulateVoxels(BitArray voxels, uint3 size) {
 			float tz = floorf(fz / sphereSize.z) * sphereSize.z + (sphereSize.z / 2.0f);
 
 			float3 sphereCenter = make_float3(tx, ty, tz);
-			float dist = length(make_float3(x, y, z) - sphereCenter);
+			float dist = length(make_float3(fx, fy, fz) - sphereCenter);
 			if (dist > fminf(fminf(sphereSize.x, sphereSize.y), sphereSize.z) / 4.0f) {
 				voxels[idx + i] = (0);
 			}

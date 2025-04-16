@@ -7,5 +7,5 @@
 
 using namespace GPUDDA;
 
-__global__ void PopulateVoxels(BitArray voxels, uint3 size);
+__global__ void PopulateVoxels(BitArray voxels, uint3 size, float3 originOffset);
 

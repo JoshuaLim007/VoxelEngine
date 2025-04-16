@@ -15,7 +15,7 @@
 using namespace GPUDDA::Graphics;
 using namespace GPUDDA;
 
-VoxelBuffer<3> CreateVoxels(uint3 size) {
+VoxelBuffer<3> CreateVoxels(uint3 size, float3 originOffset) {
 	VoxelBuffer<3> voxels;
 	voxels.dimensions[0] = size.x;
 	voxels.dimensions[1] = size.y;
@@ -31,7 +31,7 @@ VoxelBuffer<3> CreateVoxels(uint3 size) {
 		(scaled_size.y + threads.y - 1) / threads.y,
 		(scaled_size.z + threads.z - 1) / threads.z);
 
-	PopulateVoxels << <dim, threads >> > (temp, scaled_size);
+	PopulateVoxels << <dim, threads >> > (temp, scaled_size, originOffset);
 	CUDA_SAFE_CALL(cudaDeviceSynchronize());
 	cudaMemcpy(voxels.grid.raw(), temp.raw(), temp.byte_size(), cudaMemcpyDeviceToHost);
 	cudaFree(temp.raw());
@@ -41,10 +41,11 @@ VoxelBuffer<3> CreateVoxels(uint3 size) {
 
 int main()
 {
+	float3 originOffset = make_float3(-256, -256, -256);
 	//TODO: goal, 128k x 512 x 128k
 	int targetRatio = 16;
 	auto t0 = std::chrono::high_resolution_clock::now();
-	auto buffer = CreateVoxels(make_uint3(2048 * 8, 512, 2048 * 8));
+	auto buffer = CreateVoxels(make_uint3(512, 512, 512), originOffset);
 	int factor = 512 / targetRatio;
 	auto t1 = std::chrono::high_resolution_clock::now();
 	auto td = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
@@ -73,7 +74,7 @@ int main()
 	raytracer->SetFactor(factor);
 
 	void* d_pixels;
-	float3 cam_pos = { 256, 256, 256 };
+	float3 cam_pos = { 0, 0, 0 };
 	float3 cam_up = { 0, 1, 0 };
 	float3 cam_right = { 1, 0, 0 };
 	float3 cam_forward = { 0, 0, 1 };
@@ -200,7 +201,7 @@ int main()
 	});
 
 	renderer.AddRenderEventCallback([&](const CallbackData& data) {
-		RaytraceScreen(raytracer, SWIDTH, SHEIGHT, d_pixels, cam_pos, cam_forward, cam_up, cam_right);
+		RaytraceScreen(raytracer, SWIDTH, SHEIGHT, d_pixels, cam_pos - originOffset, cam_forward, cam_up, cam_right);
 		cudaMemcpy(data.pixels, d_pixels, SWIDTH * SHEIGHT * sizeof(PixelData), cudaMemcpyDeviceToHost);
 	});
 
