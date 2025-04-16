@@ -8,7 +8,6 @@
 #include "../GPUDDA/VoxelWorldBuilder.cuh"
 #include <fstream>
 #include <sstream>
-#include <C:\SDL2-devel-2.30.9-VC\SDL2-2.30.9\include\SDL.h>
 
 #define SWIDTH 1280
 #define SHEIGHT 720
@@ -43,9 +42,9 @@ VoxelBuffer<3> CreateVoxels(uint3 size) {
 int main()
 {
 	//TODO: goal, 128k x 512 x 128k
-	int targetRatio = 32;
+	int targetRatio = 16;
 	auto t0 = std::chrono::high_resolution_clock::now();
-	auto buffer = CreateVoxels(make_uint3(2048, 512, 2048));
+	auto buffer = CreateVoxels(make_uint3(2048 * 8, 512, 2048 * 8));
 	int factor = 512 / targetRatio;
 	auto t1 = std::chrono::high_resolution_clock::now();
 	auto td = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
