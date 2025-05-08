@@ -18,6 +18,9 @@
     <ClInclude Include="SDLRenderer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\..\SDL2-devel-2.30.9-VC\SDL2-2.30.9\include\SDL.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="SDLRenderer.cpp">

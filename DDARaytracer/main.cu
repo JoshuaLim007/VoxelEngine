@@ -39,41 +39,102 @@ VoxelBuffer<3> CreateVoxels(uint3 size, float3 originOffset) {
 	return voxels;
 }
 
+
+struct RenderEntities {
+	VoxelRaytracer3D* raytracer;
+	VoxelBuffer<3> voxelBuffer;
+	VoxelBuffer<3>* voxelBufferData;
+	int voxelBufferDataCount;
+	Bounds<float3>* voxelBufferDataBounds;
+	int voxelBufferDataBoundsCount;
+	int factor;
+	float3 originOffset;
+	void Free() {
+		if (raytracer) {
+			raytracer->Free();
+			delete raytracer;
+		}
+		delete voxelBuffer.grid.raw();
+		for (size_t i = 0; i < voxelBufferDataCount; i++)
+		{
+			delete voxelBufferData[i].grid.raw();
+		}
+		delete[] voxelBufferData;
+		delete[] voxelBufferDataBounds;
+	}
+};
+
 int main()
 {
-	float3 originOffset = make_float3(-256, -256, -256);
-	//TODO: goal, 128k x 512 x 128k
-	int targetRatio = 16;
-	auto t0 = std::chrono::high_resolution_clock::now();
-	auto buffer = CreateVoxels(make_uint3(512, 512, 512), originOffset);
-	int factor = 512 / targetRatio;
-	auto t1 = std::chrono::high_resolution_clock::now();
-	auto td = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
-	std::cout << "Voxel generation time: " << td << "ms" << std::endl;
+	int chunks = 9;
+	float3 offsets[] = {
+		make_float3(0,0,0),
 
-	auto t2 = std::chrono::high_resolution_clock::now();
-	auto buffers = createBuffersFromVoxels(buffer, factor);
-	auto t3 = std::chrono::high_resolution_clock::now();
-	auto td2 = std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count();
-	std::cout << "Buffer generation time: " << td2 << "ms" << std::endl;
+		make_float3(1,0,0),
+		make_float3(0,0,1),
+		make_float3(1,0,1),
 
-	delete[] buffer.grid.raw();
+		make_float3(-1,0,0),
+		make_float3(0,0,-1),
+		make_float3(-1,0,-1),
+
+		make_float3(1,0,-1),
+		make_float3(-1,0,1),
+	};
+
+	std::vector<RenderEntities> renderEntities;
+
+	for (size_t i = 0; i < chunks; i++)
+	{
+		float3 originOffset = make_float3(512, 0, 512) * offsets[i];
+		//TODO: goal, 128k x 512 x 128k
+		int targetRatio = 16;
+		auto t0 = std::chrono::high_resolution_clock::now();
+		auto buffer = CreateVoxels(make_uint3(512, 512, 512), originOffset);
+		int factor = 512 / targetRatio;
+		auto t1 = std::chrono::high_resolution_clock::now();
+		auto td = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+		std::cout << "Voxel generation time: " << td << "ms" << std::endl;
+
+		auto t2 = std::chrono::high_resolution_clock::now();
+		auto buffers = createBuffersFromVoxels(buffer, factor);
+		auto t3 = std::chrono::high_resolution_clock::now();
+		auto td2 = std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count();
+		std::cout << "Buffer generation time: " << td2 << "ms" << std::endl;
+
+		auto low_res_buffer = std::get<0>(buffers);
+		auto low_res_grid_data = std::get<1>(buffers);
+		auto bounds = std::get<2>(buffers);
+		auto count = low_res_buffer.dimensions[0] * low_res_buffer.dimensions[1] * low_res_buffer.dimensions[2];
+
+		RenderEntities temp;
+		temp.factor = factor;
+		temp.voxelBuffer = low_res_buffer;
+		temp.voxelBufferData = low_res_grid_data;
+		temp.voxelBufferDataCount = count;
+		temp.voxelBufferDataBounds = bounds;
+		temp.voxelBufferDataBoundsCount = count;
+		temp.originOffset = originOffset;
+
+		delete[] buffer.grid.raw();
+	
+		VoxelRaytracer3D* raytracer = new GPUDDA::VoxelRaytracer3D();
+		temp.raytracer = raytracer;
+
+		renderEntities.push_back(temp);
+	}
+
+
 	Renderer renderer("SDL Window");
 	if (!renderer.init(SWIDTH, SHEIGHT)) {
 		return 1;
 	}
 
-	VoxelRaytracer3D* raytracer = new GPUDDA::VoxelRaytracer3D(1);
-	auto low_res_buffer = std::get<0>(buffers);
-	auto low_res_grid_data = std::get<1>(buffers);
-	auto bounds = std::get<2>(buffers);
-	auto count = low_res_buffer.dimensions[0] * low_res_buffer.dimensions[1] * low_res_buffer.dimensions[2];
-	raytracer->UploadVoxelBuffer(low_res_buffer);
-	raytracer->UploadVoxelBufferDatas(low_res_grid_data, count);
-	raytracer->UploadVoxelBufferDataBounds(bounds, count);
-	raytracer->SetFactor(factor);
-
 	void* d_pixels;
+	void* d_normals;
+	void* d_depth;
+	void* d_s16fM16f;
+
 	float3 cam_pos = { 0, 0, 0 };
 	float3 cam_up = { 0, 1, 0 };
 	float3 cam_right = { 1, 0, 0 };
@@ -90,8 +151,11 @@ int main()
 	auto orthoWindowSize = make_float2(10, 10);
 	SetOrthoWindowSize(orthoWindowSize);
 
-	cudaMalloc(&d_pixels, SWIDTH * SHEIGHT * sizeof(PixelData));
-	cudaMemset(d_pixels, 255, SWIDTH * SHEIGHT * sizeof(PixelData));
+	Graphics::AllocateScreenColorTexture(SWIDTH, SHEIGHT, &d_pixels);
+	Graphics::AllocateNormalTexture(SWIDTH, SHEIGHT, &d_normals);
+	Graphics::AllocateDepthTexture(SWIDTH, SHEIGHT, &d_depth);
+	Graphics::AllocateSMTexture(SWIDTH, SHEIGHT, &d_s16fM16f);
+		
 	bool clicking = false;
 	renderer.AddUpdateEventCallback([&](const CallbackData& data) {
 		auto inputT0 = std::chrono::high_resolution_clock::now();
@@ -199,10 +263,55 @@ int main()
 		getDirections(cam_eular, &cam_forward, &cam_up, &cam_right);
 		printf("Input time: %fms\n", inputTd);
 	});
+	ClearDepthTexture(d_depth, SWIDTH, SHEIGHT);
 
 	renderer.AddRenderEventCallback([&](const CallbackData& data) {
-		RaytraceScreen(raytracer, SWIDTH, SHEIGHT, d_pixels, cam_pos - originOffset, cam_forward, cam_up, cam_right);
-		cudaMemcpy(data.pixels, d_pixels, SWIDTH * SHEIGHT * sizeof(PixelData), cudaMemcpyDeviceToHost);
+
+		RenderParams params;
+		params.screen_width = SWIDTH;
+		params.screen_height = SHEIGHT;
+		params.d_screen_texture = d_pixels;
+		params.d_normal_texture = d_normals;
+		params.d_depth_texture = d_depth;
+		params.d_sm_texture = d_s16fM16f;
+		params.camera_fwd = cam_forward;
+		params.camera_up = cam_up;
+		params.camera_right = cam_right;
+
+		for (size_t i = 0; i < chunks; i++)
+		{
+			auto& entity = renderEntities[i];
+			params.origin = cam_pos - entity.originOffset;
+			params.Raytracer = entity.raytracer;
+			auto raytracer = entity.raytracer;
+
+			if (raytracer->IsUploadVoxelBufferAsyncComplete() == VoxelRaytracer3D::ASYNC_STATUS_COMPLETE) {
+				raytracer->FinishAsyncUpload();
+				RaytraceScreen(params);
+			}
+			if(raytracer->IsUploadVoxelBufferAsyncComplete() == VoxelRaytracer3D::ASYNC_STATUS_LOADING) {
+				continue;
+			}
+			if (raytracer->IsUploadVoxelBufferAsyncComplete() == VoxelRaytracer3D::ASYNC_STATUS_IDLE) {
+				raytracer->UploadBuffersAsync(
+					entity.voxelBuffer, 
+					entity.voxelBufferData, 
+					entity.voxelBufferDataCount,
+					entity.voxelBufferDataBounds,
+					entity.voxelBufferDataBoundsCount
+				);
+				raytracer->SetFactor(entity.factor);
+			}
+
+			//raytracer->UploadVoxelBuffer(entity.voxelBuffer);
+			//raytracer->UploadVoxelBufferDatas(entity.voxelBufferData, entity.voxelBufferDataCount);
+			//raytracer->UploadVoxelBufferDataBounds(entity.voxelBufferDataBounds, entity.voxelBufferDataBoundsCount);
+			//raytracer->SetFactor(entity.factor);
+			//RaytraceScreen(params);
+
+		}
+
+		cudaMemcpy(data.pixels, d_pixels, SWIDTH* SHEIGHT * sizeof(PixelData), cudaMemcpyDeviceToHost);
 	});
 
 	bool running = true;
@@ -214,5 +323,13 @@ int main()
 		std::cout << "Render FPS: " << fps << std::endl;
 	}
 	cudaFree(d_pixels);
-	delete raytracer;
+	cudaFree(d_normals);
+	cudaFree(d_depth);
+	cudaFree(d_s16fM16f);
+
+	for(auto & entity : renderEntities)
+	{
+		entity.Free();
+	}
+
 }

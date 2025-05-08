@@ -112,7 +112,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>
       </PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>C:\Users\joshu\Development Tools\SDL2-devel-2.0.22-VC\SDL2-2.0.22\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\SDL2-devel-2.30.9-VC\SDL2-2.30.9\include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>
@@ -131,7 +131,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>
       </PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>C:\Users\joshu\Development Tools\SDL2-devel-2.0.22-VC\SDL2-2.0.22\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\SDL2-devel-2.30.9-VC\SDL2-2.30.9\include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>
@@ -142,6 +142,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\..\SDL2-devel-2.30.9-VC\SDL2-2.30.9\include\SDL.h" />
     <ClInclude Include="SDLRenderer.h" />
   </ItemGroup>
   <ItemGroup>

@@ -37,6 +37,7 @@ void Renderer::AddUpdateEventCallback(std::function<void(const CallbackData&)> c
 Renderer::~Renderer() {
     close();
     for (auto& thread : threads) {
+        if(thread.joinable() == false) continue;
         thread.join();
 	}
     threads.clear();
@@ -83,5 +84,13 @@ bool Renderer::Tick() {
 	for (auto& callback : updateCallbacks) {
 		callback(data);
 	}
+    if (closing == true) {
+        //wait for all threads to finish
+        for (auto& thread : threads) {
+            if (thread.joinable()) {
+                thread.join();
+            }
+        }
+    }
     return !closing;
 }

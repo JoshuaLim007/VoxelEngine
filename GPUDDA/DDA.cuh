@@ -17,6 +17,7 @@
 constexpr auto FLT_EPS_DDA = 1e-6;
 constexpr auto FLT_INF = std::numeric_limits<float>::infinity();
 constexpr auto FLT_EPS = std::numeric_limits<float>::epsilon();
+constexpr auto DDA_MAX_DISTANCE = 1e4f;
 
 namespace GPUDDA {
 	template<class T>
@@ -66,6 +67,8 @@ namespace GPUDDA {
 		__device__ __host__ BitArray(size_t num_bits);
 		__device__ __host__ BitArray(const BitArray& other, bool isGPU);
 		__device__ __host__ BitArray(size_t num_bits, bool isGPU);
+		__device__ __host__ void Copy(const BitArray& other, bool isGPU);
+		__device__ __host__ void AsyncCopy(const BitArray& other, cudaStream_t);
 		__device__ __host__ bool operator[](size_t index) const;
 		__device__ __host__ BitRef operator[](size_t index);
 		__device__ __host__ uint8_t* raw();
@@ -152,20 +155,24 @@ namespace GPUDDA {
 
 	protected:
 		VoxelRayTracerBase(size_t count) {
-			resultsCPU = RayTraceResults<T>(count);
-
 			d_results = nullptr;
-			cudaMalloc((void**)&d_results, sizeof(T) * count);
 			d_results_normal = nullptr;
-			cudaMalloc((void**)&d_results_normal, sizeof(T) * count);
 			d_results_steps = nullptr;
-			cudaMalloc((void**)&d_results_steps, sizeof(int) * count);
 			d_origins = nullptr;
 			d_rays = nullptr;
+
+			if (count == 0) {
+				return;
+			}
+
+			resultsCPU = RayTraceResults<T>(count);
+			cudaMalloc((void**)&d_results, sizeof(T) * count);
+			cudaMalloc((void**)&d_results_normal, sizeof(T) * count);
+			cudaMalloc((void**)&d_results_steps, sizeof(int) * count);
 			cudaMalloc((void**)&d_origins, sizeof(T) * count);
 			cudaMalloc((void**)&d_rays, sizeof(T) * count);
 		}
-		~VoxelRayTracerBase() {
+		virtual ~VoxelRayTracerBase() {
 			Free();
 		}
 
@@ -182,8 +189,13 @@ namespace GPUDDA {
 	
 		// GPU resources
 		GPUDDA::VoxelBuffer<N>* gpu_VoxelBuffer = nullptr;
+		BitArray gpu_VoxelBufferGrid = BitArray(); 
+
 		GPUDDA::VoxelBuffer<N>* gpu_VoxelBufferDatas = nullptr;
+		std::vector<BitArray> gpu_VoxelBufferDatasGrid = std::vector<BitArray>();
+
 		Bounds<T>* gpu_VoxelBufferDataBounds = nullptr;
+		
 		T dimensions{};
 
 	public:
@@ -204,10 +216,17 @@ namespace GPUDDA {
 			factor = f;
 		}
 		void Free() {
-			if (gpu_VoxelBuffer != nullptr)
+			if (gpu_VoxelBuffer != nullptr) {
+				cudaFree(gpu_VoxelBufferGrid.raw());
 				cudaFree(gpu_VoxelBuffer);
-			if (gpu_VoxelBufferDatas != nullptr)
+			}
+			if (gpu_VoxelBufferDatas != nullptr) {
+				for (size_t i = 0; i < gpu_VoxelBufferDatasGrid.size(); i++)
+				{
+					cudaFree(gpu_VoxelBufferDatasGrid[i].raw());
+				}
 				cudaFree(gpu_VoxelBufferDatas);
+			}
 			if (gpu_VoxelBufferDataBounds != nullptr)
 				cudaFree(gpu_VoxelBufferDataBounds);
 
@@ -233,6 +252,7 @@ namespace GPUDDA {
 	class VoxelRaytracer2D : public VoxelRayTracerBase<float2, 2> {
 	public:
 		VoxelRaytracer2D(size_t count) : VoxelRayTracerBase<float2, 2>(count){}
+		VoxelRaytracer2D() : VoxelRayTracerBase<float2, 2>(0){}
 		void UploadVoxelBuffer(const GPUDDA::VoxelBuffer<2>& buff) override;
 		void UploadVoxelBufferDatas(GPUDDA::VoxelBuffer<2>* buff, size_t count) override;
 		void UploadVoxelBufferDataBounds(Bounds<float2>* bounds, size_t count) override;
@@ -240,10 +260,39 @@ namespace GPUDDA {
 	};
 	
 	class VoxelRaytracer3D : public VoxelRayTracerBase<float3, 3> {
+		cudaStream_t stream = 0;
+		bool doAsyncThread = false;
+		int AsyncOperationState = 0;
+		std::vector<std::thread> async_thread;
+		struct AsyncParams {
+			const GPUDDA::VoxelBuffer<3>* chunks;
+			const GPUDDA::VoxelBuffer<3>* voxels;
+			size_t voxelsCount;
+			const Bounds<float3>* bounds;
+			size_t boundsCount;
+		};
+		
+		std::atomic_bool async_params_loaded = false;
+		AsyncParams* async_params = nullptr;
+
+		friend void AsyncFuncThread(VoxelRaytracer3D* t);
 	public:
+		constexpr static int ASYNC_STATUS_IDLE = 0;
+		constexpr static int ASYNC_STATUS_LOADING = 1;
+		constexpr static int ASYNC_STATUS_COMPLETE = 2;
+		~VoxelRaytracer3D();
 		VoxelRaytracer3D(size_t count) : VoxelRayTracerBase<float3, 3>(count){}
+		VoxelRaytracer3D() : VoxelRayTracerBase<float3, 3>(0){}
 		void UploadVoxelBuffer(const GPUDDA::VoxelBuffer<3>& buff) override;
 		void UploadVoxelBufferDatas(GPUDDA::VoxelBuffer<3>* buff, size_t count) override;
+
+		bool UploadBuffersAsync(
+			const GPUDDA::VoxelBuffer<3>& voxelChunks,
+			GPUDDA::VoxelBuffer<3>* voxelChunksData, size_t count,
+			Bounds<float3>* bounds, size_t boundsCount);
+		int IsUploadVoxelBufferAsyncComplete();
+		void FinishAsyncUpload();
+
 		void UploadVoxelBufferDataBounds(Bounds<float3>* bounds, size_t count) override;
 		RayTraceResults<float3> Raytrace(std::vector<float3> origin, std::vector<float3> ray) override;
 	};

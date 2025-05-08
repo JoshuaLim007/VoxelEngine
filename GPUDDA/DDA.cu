@@ -40,7 +40,17 @@ namespace GPUDDA {
         }
         data = new uint8_t[(size + 7) / 8];
     }
-
+    __device__ __host__ void BitArray::Copy(const BitArray& other, bool isGPU) {
+        if (isGPU) {
+            cudaMemcpy(data, other.data, (size + 7) / 8, cudaMemcpyHostToDevice);
+            return;
+        }
+        std::copy(other.data, other.data + (size + 7) / 8, data);
+    }
+    __device__ __host__ void BitArray::AsyncCopy(const BitArray& other, cudaStream_t stream) {
+        cudaMemcpyAsync(data, other.data, (size + 7) / 8, cudaMemcpyHostToDevice, stream);
+        return;
+    }
     __device__ __host__ bool BitArray::operator[](size_t index) const {
 		if (index >= size) {
 			return false; // Out of bounds
@@ -330,50 +340,49 @@ namespace GPUDDA {
 
 
     void VoxelRaytracer2D::UploadVoxelBuffer(const GPUDDA::VoxelBuffer<2>& buff) {
-        if (gpu_VoxelBuffer != nullptr) {
-			VoxelBuffer<2>* temp;
-			cudaMemcpy(temp, gpu_VoxelBuffer, sizeof(GPUDDA::VoxelBuffer<2>), cudaMemcpyDeviceToHost);
-            cudaFree(temp->grid.raw());
-            cudaFree(gpu_VoxelBuffer);
+        if (gpu_VoxelBuffer == nullptr) {
+            cudaMalloc((void**)&gpu_VoxelBuffer, sizeof(GPUDDA::VoxelBuffer<2>));
+            gpu_VoxelBufferGrid = BitArray(buff.grid.bit_size(), true);
         }
 
         dimensions.x = buff.dimensions[0];
 		dimensions.y = buff.dimensions[1];
 
-		BitArray bitArray(buff.grid, true);
-
         VoxelBuffer<2> temp;
         temp.dimensions[0] = buff.dimensions[0];
         temp.dimensions[1] = buff.dimensions[1];
-        temp.grid = bitArray;
-
-        cudaMalloc((void**)&gpu_VoxelBuffer, sizeof(GPUDDA::VoxelBuffer<2>));
+        gpu_VoxelBufferGrid.Copy(buff.grid, true);
+        temp.grid = gpu_VoxelBufferGrid;
         cudaMemcpy(gpu_VoxelBuffer, &temp, sizeof(GPUDDA::VoxelBuffer<2>), cudaMemcpyHostToDevice);
     }
 
     void VoxelRaytracer2D::UploadVoxelBufferDatas(GPUDDA::VoxelBuffer<2>* buff, size_t count) {
-		if (gpu_VoxelBufferDatas != nullptr)
-			cudaFree(gpu_VoxelBufferDatas);
+        auto memSize = sizeof(GPUDDA::VoxelBuffer<2>) * count;
+        if (gpu_VoxelBufferDatas == nullptr) {
+            cudaMalloc((void**)&gpu_VoxelBufferDatas, memSize);
+            for (size_t i = 0; i < count; i++)
+            {
+                gpu_VoxelBufferDatasGrid.push_back(BitArray(buff[i].grid.bit_size(), true));
+            }
+        }
 
         GPUDDA::VoxelBuffer<2>* temp = new GPUDDA::VoxelBuffer<2>[count];
         for (size_t i = 0; i < count; i++)
         {
             temp[i].dimensions[0] = buff[i].dimensions[0];
             temp[i].dimensions[1] = buff[i].dimensions[1];
-			temp[i].grid = BitArray(buff[i].grid, true);
+            gpu_VoxelBufferDatasGrid[i].Copy(buff[i].grid, true);
+            temp[i].grid = gpu_VoxelBufferDatasGrid[i];
         }
 
-        auto memSize = sizeof(GPUDDA::VoxelBuffer<2>) * count;
-        cudaMalloc((void**)&gpu_VoxelBufferDatas, memSize);
         cudaMemcpy(gpu_VoxelBufferDatas, temp, memSize, cudaMemcpyHostToDevice);
     }
 
     void VoxelRaytracer2D::UploadVoxelBufferDataBounds(Bounds<float2>* bounds, size_t count) {
-		if (gpu_VoxelBufferDataBounds != nullptr)
-			cudaFree(gpu_VoxelBufferDataBounds);
-
         auto memSize = sizeof(Bounds<float2>) * count;
-        cudaMalloc((void**)&gpu_VoxelBufferDataBounds, memSize);
+        if (gpu_VoxelBufferDataBounds == nullptr) {
+            cudaMalloc((void**)&gpu_VoxelBufferDataBounds, memSize);
+        }
         cudaMemcpy(gpu_VoxelBufferDataBounds, bounds, memSize, cudaMemcpyHostToDevice);
     }
 
@@ -683,6 +692,9 @@ namespace GPUDDA {
                 &start_normal)) {
                 start = intersect;
             }
+            else {
+                return false;
+            }
         }
 		out_normal = make_float3(0, 0, 0);
         float3 hitPosition = make_float3(0, 0, 0);
@@ -816,45 +828,192 @@ namespace GPUDDA {
     }
 
     void VoxelRaytracer3D::UploadVoxelBuffer(const GPUDDA::VoxelBuffer<3>& buff) {
-
-        if (gpu_VoxelBuffer != nullptr) {
-            VoxelBuffer<3>* temp;
-            cudaMemcpy(temp, gpu_VoxelBuffer, sizeof(GPUDDA::VoxelBuffer<3>), cudaMemcpyDeviceToHost);
-            cudaFree(temp->grid.raw());
-            cudaFree(gpu_VoxelBuffer);
+        if (gpu_VoxelBuffer == nullptr) {
+            cudaMalloc((void**)&gpu_VoxelBuffer, sizeof(GPUDDA::VoxelBuffer<3>));
+            gpu_VoxelBufferGrid = BitArray(buff.grid.bit_size(), true);
         }
 
 		dimensions.x = buff.dimensions[0];
 		dimensions.y = buff.dimensions[1];
 		dimensions.z = buff.dimensions[2];
-
 		VoxelBuffer<3> temp;
-		temp.grid = BitArray(buff.grid, true);
+        gpu_VoxelBufferGrid.Copy(buff.grid, true);
+
+        temp.grid = gpu_VoxelBufferGrid;
 		temp.dimensions[0] = buff.dimensions[0];
 		temp.dimensions[1] = buff.dimensions[1];
 		temp.dimensions[2] = buff.dimensions[2];
-
-		cudaMalloc((void**)&gpu_VoxelBuffer, sizeof(GPUDDA::VoxelBuffer<3>));
 		cudaMemcpy(gpu_VoxelBuffer, &temp, sizeof(GPUDDA::VoxelBuffer<3>), cudaMemcpyHostToDevice);
 	}
 
+    void AsyncFuncThread(VoxelRaytracer3D* raytracer) {
+        VoxelRaytracer3D* t = raytracer;
+    	while (t->doAsyncThread) {
+            //wait for new params
+            while (true) {
+                if (!t->doAsyncThread) {
+                    return;
+                }
+
+                auto value = t->async_params_loaded.load(std::memory_order_acquire);
+                if (value == false) {
+                    continue;
+                }
+                else {
+                    break;
+                }
+            }
+
+            auto params = *t->async_params;
+
+            //chunks
+            t->gpu_VoxelBufferGrid.AsyncCopy(params.chunks->grid, t->stream);
+            //voxels
+            for (size_t i = 0; i < params.voxelsCount; i++)
+            {
+                t->gpu_VoxelBufferDatasGrid[i].AsyncCopy(params.voxels[i].grid, t->stream);
+            }
+            //bounds
+            auto memSize = sizeof(Bounds<float3>) * params.boundsCount;
+            cudaMemcpyAsync(t->gpu_VoxelBufferDataBounds, params.bounds, memSize, cudaMemcpyHostToDevice, t->stream);
+
+            //wait for all copies to finish
+            cudaStreamSynchronize(t->stream);
+
+            t->dimensions.x = params.chunks->dimensions[0];
+            t->dimensions.y = params.chunks->dimensions[1];
+            t->dimensions.z = params.chunks->dimensions[2];
+
+            //chunks final
+            VoxelBuffer<3> chunks;
+            chunks.grid = t->gpu_VoxelBufferGrid;
+            chunks.dimensions[0] = params.chunks->dimensions[0];
+            chunks.dimensions[1] = params.chunks->dimensions[1];
+            chunks.dimensions[2] = params.chunks->dimensions[2];
+            cudaMemcpyAsync(t->gpu_VoxelBuffer, &chunks, sizeof(GPUDDA::VoxelBuffer<3>), cudaMemcpyHostToDevice, t->stream);
+
+            //voxels final
+            std::vector<GPUDDA::VoxelBuffer<3>> temp(params.voxelsCount);
+            memSize = sizeof(GPUDDA::VoxelBuffer<3>) * params.voxelsCount;
+            for (size_t i = 0; i < params.voxelsCount; i++)
+            {
+                temp[i].dimensions[0] = params.voxels[i].dimensions[0];
+                temp[i].dimensions[1] = params.voxels[i].dimensions[1];
+                temp[i].dimensions[2] = params.voxels[i].dimensions[2];
+                temp[i].grid = t->gpu_VoxelBufferDatasGrid[i];
+            }
+            cudaMemcpyAsync(t->gpu_VoxelBufferDatas, temp.data(), memSize, cudaMemcpyHostToDevice, t->stream);
+
+            //wait for all copies to finish
+            cudaStreamSynchronize(t->stream);
+
+            delete t->async_params;
+            t->async_params = nullptr;
+            t->async_params_loaded.store(false, std::memory_order_release);
+            t->AsyncOperationState = 2;
+        }
+    }
+    VoxelRaytracer3D::~VoxelRaytracer3D() {
+        doAsyncThread = false;
+        if (async_thread.size() > 0) {
+            if (async_thread[0].joinable()) {
+                async_thread[0].join();
+            }
+		}
+        async_thread.clear();
+    }
+    bool VoxelRaytracer3D::UploadBuffersAsync(
+        const GPUDDA::VoxelBuffer<3>& chunks,
+        GPUDDA::VoxelBuffer<3>* voxels, size_t voxelsCount,
+        Bounds<float3>* bounds, size_t boundsCount
+        ) 
+    {
+        //if not in idle state, do not start another upload
+        if(AsyncOperationState != 0) {
+            throw std::runtime_error("Async upload already in progress");
+		}
+
+        doAsyncThread = true;
+
+        if (async_thread.size() == 0) {
+            async_thread.push_back(std::thread(AsyncFuncThread, this));
+        }
+
+        //chunks
+        if (gpu_VoxelBuffer == nullptr) {
+            cudaMalloc((void**)&gpu_VoxelBuffer, sizeof(GPUDDA::VoxelBuffer<3>));
+            gpu_VoxelBufferGrid = BitArray(chunks.grid.bit_size(), true);
+        }
+        //voxels
+        auto memSize = sizeof(GPUDDA::VoxelBuffer<3>) * voxelsCount;
+        if (gpu_VoxelBufferDatas == nullptr) {
+            cudaMalloc((void**)&gpu_VoxelBufferDatas, memSize);
+            for (size_t i = 0; i < voxelsCount; i++)
+            {
+                gpu_VoxelBufferDatasGrid.push_back(BitArray(voxels[i].grid.bit_size(), true));
+            }
+        }
+        //bounds
+        memSize = sizeof(Bounds<float3>) * boundsCount;
+        if (gpu_VoxelBufferDataBounds == nullptr) {
+            cudaMalloc((void**)&gpu_VoxelBufferDataBounds, memSize);
+        }
+
+        AsyncOperationState = 1;
+        AsyncParams* params = new AsyncParams();
+        params->chunks = &chunks;
+        params->voxels = voxels;
+        params->voxelsCount = voxelsCount;
+        params->bounds = bounds;
+        params->boundsCount = boundsCount;
+
+        //send data to thread
+        async_params = params;
+        async_params_loaded.store(true, std::memory_order_release);
+
+        return true;
+    }
+    void VoxelRaytracer3D::FinishAsyncUpload() {
+        if (AsyncOperationState == 2) {
+            AsyncOperationState = 0;
+        }
+        else {
+            throw std::runtime_error("Async upload not finished yet");
+        }
+    }
+    int VoxelRaytracer3D::IsUploadVoxelBufferAsyncComplete() {
+        return AsyncOperationState;
+	}
+
 	void VoxelRaytracer3D::UploadVoxelBufferDatas(GPUDDA::VoxelBuffer<3>* buff, size_t count) {
+        auto memSize = sizeof(GPUDDA::VoxelBuffer<3>) * count;
+        if (gpu_VoxelBufferDatas == nullptr) {
+            cudaMalloc((void**)&gpu_VoxelBufferDatas, memSize);
+            for (size_t i = 0; i < count; i++)
+            {
+                gpu_VoxelBufferDatasGrid.push_back(BitArray(buff[i].grid.bit_size(), true));
+            }
+        }
+
 		GPUDDA::VoxelBuffer<3>* temp = new GPUDDA::VoxelBuffer<3>[count];
 		for (size_t i = 0; i < count; i++)
 		{
 			temp[i].dimensions[0] = buff[i].dimensions[0];
 			temp[i].dimensions[1] = buff[i].dimensions[1];
 			temp[i].dimensions[2] = buff[i].dimensions[2];
-			temp[i].grid = BitArray(buff[i].grid, true);
+            gpu_VoxelBufferDatasGrid[i].Copy(buff[i].grid, true);
+            temp[i].grid = gpu_VoxelBufferDatasGrid[i];
 		}
-		auto memSize = sizeof(GPUDDA::VoxelBuffer<3>) * count;
-		cudaMalloc((void**)&gpu_VoxelBufferDatas, memSize);
 		cudaMemcpy(gpu_VoxelBufferDatas, temp, memSize, cudaMemcpyHostToDevice);
+        delete[] temp;
 	}
 
 	void VoxelRaytracer3D::UploadVoxelBufferDataBounds(Bounds<float3>* bounds, size_t count) {
-		auto memSize = sizeof(Bounds<float3>) * count;
-		cudaMalloc((void**)&gpu_VoxelBufferDataBounds, memSize);
+        auto memSize = sizeof(Bounds<float3>) * count;
+        if (gpu_VoxelBufferDataBounds == nullptr) {
+            cudaMalloc((void**)&gpu_VoxelBufferDataBounds, memSize);
+        }
+
 		cudaMemcpy(gpu_VoxelBufferDataBounds, bounds, memSize, cudaMemcpyHostToDevice);
 	}
 
@@ -871,7 +1030,7 @@ namespace GPUDDA {
 		cudaDeviceSynchronize();
 
 		auto t0 = std::chrono::high_resolution_clock::now();
-		dispatch << < numBlocks, blockSize >> > (
+		dispatch <<< numBlocks, blockSize >> > (
 			d_origins, d_rays, gpu_VoxelBuffer, gpu_VoxelBufferDatas, gpu_VoxelBufferDataBounds, factor,
 			d_results, d_results_normal, d_results_steps, count);
 
@@ -899,5 +1058,6 @@ namespace GPUDDA {
 		cudaDeviceSynchronize();
 		return result;
     }
+
 
 }

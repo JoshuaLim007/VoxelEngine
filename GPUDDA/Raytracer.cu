@@ -1,22 +1,25 @@
 #include "Raytracer.cuh"
 #include "cuda_noise.cuh"
+#include "exception"
+#include <bit>
+#include <cstdint>
 using namespace GPUDDA;
 
-struct RenderParams {
+struct DeviceRenderParams {
 	uint2 Resolution;
 	size_t FrameNumber;
 	float Fov;
 	float2 OrthoSize;
-	__device__ __host__ RenderParams(uint2 r, size_t n, float fov, float2 size) {
+	__device__ __host__ DeviceRenderParams(uint2 r, size_t n, float fov, float2 size) {
 		Resolution = r;
 		FrameNumber = n;
 		Fov = fov;
 		OrthoSize = size;
 	}
-	__device__ __host__ RenderParams() {}
+	__device__ __host__ DeviceRenderParams() {}
 };
-__device__ RenderParams d_params;
-RenderParams h_params = RenderParams(make_uint2(0,0), 0, 90, make_float2(10,10));
+__device__ DeviceRenderParams d_params;
+DeviceRenderParams h_params = DeviceRenderParams(make_uint2(0,0), 0, 90, make_float2(10,10));
 
 __host__ __device__ void Graphics::getDirections(float3 eularAngles, float3* forwad, float3* up, float3* right)
 {
@@ -68,11 +71,79 @@ __device__ void getRayDirectionOrtho(
 	out_rayOrigin += up * (uv.y * 2 - 1) * screen_size.y;
 }
 
-template<typename T>
-__device__ void setPixelColor(void* screen_texture, uint32_t screen_width, uint32_t screen_height, int x, int y, float3 color) {
-	T* pixels = (T*)screen_texture;
+__device__ uint32_t packNormal1010102(float3 n) {
+	int32_t x = int(clamp(n.x, -1.0f, 1.0f) * 511.0f);
+	int32_t y = int(clamp(n.y, -1.0f, 1.0f) * 511.0f);
+	int32_t z = int(clamp(n.z, -1.0f, 1.0f) * 511.0f);
+	return (z & 0x3FF) << 20 | (y & 0x3FF) << 10 | (x & 0x3FF);
+}
+__device__ float3 unpackNormal1010102(uint32_t n) {
+	float3 normal;
+	normal.x = ((n >> 0) & 0x3FF) / 511.0f;
+	normal.y = ((n >> 10) & 0x3FF) / 511.0f;
+	normal.z = ((n >> 20) & 0x3FF) / 511.0f;
+	return normal * 2 - make_float3(1, 1, 1);
+}
+__device__ uint32_t packTwoFloat(float a, float b) {
+	int32_t x = int(clamp(a, -1.0f, 1.0f) * 32767.0f);
+	int32_t y = int(clamp(b, -1.0f, 1.0f) * 32767.0f);
+	return (y & 0xFFFF) << 16 | (x & 0xFFFF);
+}
+__device__ float2 unpackTwoFloat(uint32_t n) {
+	float2 result;
+	result.x = ((n >> 0) & 0xFFFF) / 32767.0f;
+	result.y = ((n >> 16) & 0xFFFF) / 32767.0f;
+	return result * 2 - make_float2(1, 1);
+}
+template<typename T, typename I>
+__device__ I getPixelColor(void* screen_texture, uint32_t screen_width, uint32_t screen_height, int x, int y) { 
+	throw std::exception("Unsupported pixel format");
+}
+template<>
+__device__ float3 getPixelColor<Graphics::BGRA8888, float3>(void* screen_texture, uint32_t screen_width, uint32_t screen_height, int x, int y) {
+	Graphics::BGRA8888* pixels = (Graphics::BGRA8888*)screen_texture;
 	if (x < screen_width && y < screen_height) {
-		T* pixel = &pixels[y * screen_width + x];
+		Graphics::BGRA8888* pixel = &pixels[y * screen_width + x];
+		return make_float3(pixel->r / 255.0f, pixel->g / 255.0f, pixel->b / 255.0f);
+	}
+	return make_float3(0, 0, 0);
+}
+template<>
+__device__ float3 getPixelColor<Graphics::Normal1010102, float3>(void* screen_texture, uint32_t screen_width, uint32_t screen_height, int x, int y) {
+	Graphics::Normal1010102* pixels = (Graphics::Normal1010102*)screen_texture;
+	if (x < screen_width && y < screen_height) {
+		Graphics::Normal1010102* pixel = &pixels[y * screen_width + x];
+		return unpackNormal1010102(*pixel);
+	}
+	return make_float3(0, 0, 0);
+}
+template<>
+__device__ float getPixelColor<Graphics::Depth32f, float>(void* screen_texture, uint32_t screen_width, uint32_t screen_height, int x, int y) {
+	Graphics::Depth32f* pixels = (Graphics::Depth32f*)screen_texture;
+	if (x < screen_width && y < screen_height) {
+		return (float)pixels[y * screen_width + x];
+	}
+	return 0;
+}
+template<>
+__device__ float2 getPixelColor<Graphics::S16fM16f, float2>(void* screen_texture, uint32_t screen_width, uint32_t screen_height, int x, int y) {
+	Graphics::S16fM16f* pixels = (Graphics::S16fM16f*)screen_texture;
+	if (x < screen_width && y < screen_height) {
+		Graphics::S16fM16f* pixel = &pixels[y * screen_width + x];
+		return unpackTwoFloat(*pixel);
+	}
+	return make_float2(0, 0);
+}
+
+template<typename T, typename I>
+__device__ void setPixelColor(void* screen_texture, uint32_t screen_width, uint32_t screen_height, int x, int y, I color){
+	throw std::exception("Unsupported pixel format");
+}
+template<>
+__device__ void setPixelColor<Graphics::BGRA8888>(void* screen_texture, uint32_t screen_width, uint32_t screen_height, int x, int y, float3 color) {
+	Graphics::BGRA8888* pixels = (Graphics::BGRA8888*)screen_texture;
+	if (x < screen_width && y < screen_height) {
+		Graphics::BGRA8888* pixel = &pixels[y * screen_width + x];
 		color.x = fminf(fmaxf(color.x, 0), 1);
 		color.y = fminf(fmaxf(color.y, 0), 1);
 		color.z = fminf(fmaxf(color.z, 0), 1);
@@ -81,6 +152,28 @@ __device__ void setPixelColor(void* screen_texture, uint32_t screen_width, uint3
 		pixel->g = color.y * 255;
 		pixel->b = color.z * 255;
 		pixel->a = 255;
+	}
+}
+template<>
+__device__ void setPixelColor<Graphics::Normal1010102>(void* screen_texture, uint32_t screen_width, uint32_t screen_height, int x, int y, float3 normal) {
+	if (x < screen_width && y < screen_height) {
+		normal = normalize(normal);
+		Graphics::Normal1010102* pixel = (Graphics::Normal1010102*)screen_texture;
+		pixel[y * screen_width + x] = packNormal1010102(normal);
+	}
+}
+template<>
+__device__ void setPixelColor<Graphics::Depth32f>(void* screen_texture, uint32_t screen_width, uint32_t screen_height, int x, int y, float depth) {
+	if (x < screen_width && y < screen_height) {
+		Graphics::Depth32f* pixel = (Graphics::Depth32f*)screen_texture;
+		pixel[y * screen_width + x] = depth;
+	}
+}
+template<>
+__device__ void setPixelColor<Graphics::S16fM16f>(void* screen_texture, uint32_t screen_width, uint32_t screen_height, int x, int y, float2 sm) {
+	if (x < screen_width && y < screen_height) {
+		Graphics::S16fM16f* pixel = (Graphics::S16fM16f*)screen_texture;
+		pixel[y * screen_width + x] = packTwoFloat(sm.x, sm.y);
 	}
 }
 
@@ -168,7 +261,7 @@ __device__ float3 calculateColor(float3 camPos, float3 normal, float3 position,
 	return color;
 }
 
-__device__ float3 Tonemap(float3 color) {
+__device__ float3 tonemap(float3 color) {
 	float3 tonemappedColor = color / (color + make_float3(1.0f));
 	tonemappedColor.x = fminf(fmaxf(tonemappedColor.x, 0), 1);
 	tonemappedColor.y = fminf(fmaxf(tonemappedColor.y, 0), 1);
@@ -181,19 +274,27 @@ __global__ void screenDispatch(
 	float3 camera_fwd,
 	float3 camera_up,
 	float3 camera_right,
-	uint32_t screen_width,
-	uint32_t screen_height,
-	void* screen_texture,
 
+	//textures
+	void* screen_texture,
+	void* screen_normal_texture,
+	void* screen_depth_texture,
+	void* screen_sm_texture,
+
+	//world data
 	VoxelBuffer<3>* chunks,
 	VoxelBuffer<3>* chunksData,
 	Bounds<float3>* chunkBoundingBoxes,
 	int factor) {
 
+	uint32_t screen_width = d_params.Resolution.x;
+	uint32_t screen_height = d_params.Resolution.y;
+
 	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	int y = blockIdx.y * blockDim.y + threadIdx.y;
 	if (x < screen_width && y < screen_height) {
 		float2 uv = make_float2(x / (float)screen_width, y / (float)screen_height);
+
 #ifdef ORTHO
 		float3 ray_dir;
 		getRayDirectionOrtho(camera_fwd, camera_up, camera_right, uv, d_params.OrthoSize, origin, ray_dir, origin);
@@ -203,9 +304,24 @@ __global__ void screenDispatch(
 		int steps;
 		float3 normal;
 		float3 hitPos;
+
+		auto tx = threadIdx.x + blockIdx.x * blockDim.x;
+		auto ty = threadIdx.y + blockIdx.y * blockDim.y;
+
 		bool hit = raytrace(MAX_STEPS, origin, ray_dir, chunks[0], chunksData, chunkBoundingBoxes, factor, steps, normal, hitPos);
 		normal = -normal;
+
+		float depth = getPixelColor<Graphics::Depth32f, float>(screen_depth_texture, screen_width, screen_height, x, y);
+		depth = depth == 0 ? FLT_INF : depth;
+
 		if (hit) {
+
+			//depth culling before doing any lighting calculations
+			float hitDepth = length(hitPos - origin);
+			if (hitDepth > depth) {
+				return;
+			}
+
 #ifdef DEBUG_VIEW
 			float dist = length(hitPos - origin);
 			hitPos.x = (hitPos.x) / 128.0f;
@@ -237,26 +353,28 @@ __global__ void screenDispatch(
 #else
 			int color_steps = 0;
 			float3 color = calculateColor(origin, normal, hitPos, chunks, chunksData, chunkBoundingBoxes, factor, color_steps);
-			color = Tonemap(color);
+			color = tonemap(color);
 			steps += color_steps;
 			setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(color.x, color.y, color.z));
 #endif
+			setPixelColor<Graphics::Depth32f>(screen_depth_texture, screen_width, screen_height, x, y, length(hitPos - origin));
 		}
 		else {
+			if (depth < FLT_INF) {
+				return;
+			}
 			setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(ray_dir.x, ray_dir.y, ray_dir.z));
-		}
-
-		//if center of screen
-		auto tx = threadIdx.x + blockIdx.x * blockDim.x;
-		auto ty = threadIdx.y + blockIdx.y * blockDim.y;
-		if (tx == d_params.Resolution.x >> 1 && ty == d_params.Resolution.y >> 1) {
-			float3 color = make_float3(10, 10, 10);
-			setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(color.x, color.y, color.z));
 		}
 
 #ifdef DEBUG_VIEW
 		setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(steps / 256.0f, 0, 0));
 #endif
+
+		//if center of screen
+		if (tx == d_params.Resolution.x >> 1 && ty == d_params.Resolution.y >> 1) {
+			float3 color = make_float3(10, 10, 10);
+			setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(color.x, color.y, color.z));
+		}
 	}
 }
 
@@ -282,32 +400,45 @@ void Graphics::SetOrthoWindowSize(float2 size) {
 	h_params.OrthoSize = size;
 }
 
-void Graphics::RaytraceScreen(
-	VoxelRaytracer3D* rt,
-	uint32_t screen_width,
-	uint32_t screen_height,
-	void* d_screen_texture,
-	float3 origin,
-	float3 camera_fwd,
-	float3 camera_up,
-	float3 camera_right) {
+void Graphics::RaytraceScreen(const Graphics::RenderParams& params) {
 
 	dim3 blockSize(16, 16, 1);
-	dim3 numBlocks((screen_width + blockSize.x - 1) / blockSize.x, (screen_height + blockSize.y - 1) / blockSize.y, 1);
+	dim3 numBlocks((params.screen_width + blockSize.x - 1) / blockSize.x, (params.screen_height + blockSize.y - 1) / blockSize.y, 1);
 
+	auto rt = params.Raytracer;
 	auto buffer = rt->GetVoxelBuffer();
 	auto bufferDataBounds = rt->GetVoxelBufferDataBounds();
 	auto bufferData = rt->GetVoxelBufferDatas();
 	auto factor = rt->GetFactor();
 	
-	h_params.Resolution = make_uint2(screen_width, screen_height);
-	cudaMemcpyToSymbol(d_params, &h_params, sizeof(RenderParams));
+	h_params.Resolution = make_uint2(params.screen_width, params.screen_height);
+	cudaMemcpyToSymbol(d_params, &h_params, sizeof(DeviceRenderParams));
 	h_params.FrameNumber++;
 
 	screenDispatch << < numBlocks, blockSize >> > (
-		origin, camera_fwd, camera_up, camera_right,
-		screen_width, screen_height, d_screen_texture,
+		params.origin, params.camera_fwd, params.camera_up, params.camera_right,
+		params.d_screen_texture, params.d_normal_texture, params.d_depth_texture, params.d_sm_texture,
 		buffer, bufferData, bufferDataBounds, factor);
 
 	CUDA_SAFE_CALL(cudaDeviceSynchronize());
+}
+
+void Graphics::ClearDepthTexture(void* d_screen_texture, uint32_t screen_width, uint32_t screen_height) {
+	CUDA_SAFE_CALL(cudaMemset(d_screen_texture, 0, screen_width * screen_height * sizeof(Graphics::Depth32f)));
+}
+void Graphics::AllocateScreenColorTexture(uint32_t screen_width, uint32_t screen_height, void** d_screen_texture) {
+	CUDA_SAFE_CALL(cudaMalloc(d_screen_texture, screen_width * screen_height * sizeof(Graphics::BGRA8888)));
+	CUDA_SAFE_CALL(cudaMemset(*d_screen_texture, 0, screen_width * screen_height * sizeof(Graphics::BGRA8888)));
+}
+void Graphics::AllocateNormalTexture(uint32_t screen_width, uint32_t screen_height, void** d_screen_texture) {
+	CUDA_SAFE_CALL(cudaMalloc(d_screen_texture, screen_width * screen_height * sizeof(Graphics::Normal1010102)));
+	CUDA_SAFE_CALL(cudaMemset(*d_screen_texture, 0, screen_width * screen_height * sizeof(Graphics::Normal1010102)));
+}
+void Graphics::AllocateDepthTexture(uint32_t screen_width, uint32_t screen_height, void** d_screen_texture) {
+	CUDA_SAFE_CALL(cudaMalloc(d_screen_texture, screen_width * screen_height * sizeof(Graphics::Depth32f)));
+	CUDA_SAFE_CALL(cudaMemset(*d_screen_texture, 0, screen_width * screen_height * sizeof(Graphics::Depth32f)));
+}
+void Graphics::AllocateSMTexture(uint32_t screen_width, uint32_t screen_height, void** d_screen_texture) {
+	CUDA_SAFE_CALL(cudaMalloc(d_screen_texture, screen_width * screen_height * sizeof(Graphics::S16fM16f)));
+	CUDA_SAFE_CALL(cudaMemset(*d_screen_texture, 0, screen_width * screen_height * sizeof(Graphics::S16fM16f)));
 }

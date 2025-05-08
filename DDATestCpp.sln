@@ -3,12 +3,6 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.3.32922.545
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DDATestCpp", "DDATestCpp\DDATestCpp.vcxproj", "{5335B105-81A2-4C5C-B598-495EAE232BFC}"
-	ProjectSection(ProjectDependencies) = postProject
-		{35CD9DF1-B607-91A9-1E0E-3A390C53A9D7} = {35CD9DF1-B607-91A9-1E0E-3A390C53A9D7}
-		{55BC96D4-39FA-46AA-B811-379B56B83EAF} = {55BC96D4-39FA-46AA-B811-379B56B83EAF}
-	EndProjectSection
-EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "GPUDDA", "GPUDDA\GPUDDA.vcxproj", "{35CD9DF1-B607-91A9-1E0E-3A390C53A9D7}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SDLRenderer", "SDLRenderer\SDLRenderer.vcxproj", "{55BC96D4-39FA-46AA-B811-379B56B83EAF}"
@@ -27,14 +21,6 @@ Global
 		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{5335B105-81A2-4C5C-B598-495EAE232BFC}.Debug|x64.ActiveCfg = Debug|x64
-		{5335B105-81A2-4C5C-B598-495EAE232BFC}.Debug|x64.Build.0 = Debug|x64
-		{5335B105-81A2-4C5C-B598-495EAE232BFC}.Debug|x86.ActiveCfg = Debug|Win32
-		{5335B105-81A2-4C5C-B598-495EAE232BFC}.Debug|x86.Build.0 = Debug|Win32
-		{5335B105-81A2-4C5C-B598-495EAE232BFC}.Release|x64.ActiveCfg = Release|x64
-		{5335B105-81A2-4C5C-B598-495EAE232BFC}.Release|x64.Build.0 = Release|x64
-		{5335B105-81A2-4C5C-B598-495EAE232BFC}.Release|x86.ActiveCfg = Release|Win32
-		{5335B105-81A2-4C5C-B598-495EAE232BFC}.Release|x86.Build.0 = Release|Win32
 		{35CD9DF1-B607-91A9-1E0E-3A390C53A9D7}.Debug|x64.ActiveCfg = Debug|x64
 		{35CD9DF1-B607-91A9-1E0E-3A390C53A9D7}.Debug|x64.Build.0 = Debug|x64
 		{35CD9DF1-B607-91A9-1E0E-3A390C53A9D7}.Debug|x86.ActiveCfg = Debug|x64
