@@ -107,7 +107,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions);SFML_STATIC</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>C:\Users\joshu\Development Tools\SDL2-devel-2.0.22-VC\SDL2-2.0.22\include;$(CUDA_PATH_V12_8)\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\joshu\Development Tools\SDL2-devel-2.0.22-VC\SDL2-2.0.22\include;$(CUDA_PATH_V12_8)\include;C:\Users\joshu\source\repos\DDATestCpp\VoxelRT</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
@@ -128,7 +128,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions);SFML_STATIC</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>C:\Users\joshu\Development Tools\SDL2-devel-2.0.22-VC\SDL2-2.0.22\include;$(CUDA_PATH_V12_8)\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\joshu\Development Tools\SDL2-devel-2.0.22-VC\SDL2-2.0.22\include;$(CUDA_PATH_V12_8)\include;C:\Users\joshu\source\repos\DDATestCpp\VoxelRT</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
@@ -148,7 +148,10 @@
     <ClCompile Include="DDATestCpp.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\GPUDDA\GPUDDA.vcxproj">
+    <ProjectReference Include="..\SDLRenderer\SDLRenderer.vcxproj">
+      <Project>{55bc96d4-39fa-46aa-b811-379b56b83eaf}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\VoxelRT\VoxelRT.vcxproj">
       <Project>{35cd9df1-b607-91a9-1e0e-3a390c53a9d7}</Project>
     </ProjectReference>
   </ItemGroup>
