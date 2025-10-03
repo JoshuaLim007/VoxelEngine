@@ -738,11 +738,6 @@ __device__ void DDARayTraversal(const DDARayParams<float3, 3> &Params, DDARayRes
     }
 }
 
-//__device__ bool debugPrint;
-//__device__ void DebugPrint(bool val) {
-//    debugPrint = val;
-//}
-
 __device__ bool Raytrace(int maxSteps, float3 origin, float3 ray, VoxelBuffer<3> chunks, VoxelBuffer<3> *chunksData,
                          Bounds<float3> *chunkBoundingBoxes, int factor, int &out_steps, float3 &out_normal,
                          float3 &out_pos)
@@ -774,13 +769,7 @@ __device__ bool Raytrace(int maxSteps, float3 origin, float3 ray, VoxelBuffer<3>
     out_normal = make_float3(0, 0, 0);
     float3 hitPosition = make_float3(0, 0, 0);
     bool hit = false;
-    //     auto tx = threadIdx.x + blockIdx.x * blockDim.x;
-    //     auto ty = threadIdx.y + blockIdx.y * blockDim.y;
-    //     bool doDebugPrint = tx == 1920 >> 1 && ty == 1080 >> 1 && debugPrint;
-    //     if (doDebugPrint) {
-    // printf("----------START-----------\n");
-    //     }
-    // int i = 0;
+
     while (total_steps < maxSteps)
     {
         float3 start_high_res;
@@ -789,16 +778,6 @@ __device__ bool Raytrace(int maxSteps, float3 origin, float3 ray, VoxelBuffer<3>
         params.per_voxel_bounds_scale = factor;
         DDARayResults<float3> results;
         DDARayTraversal(params, results);
-
-        //        if (doDebugPrint) {
-        //            printf("---CHUNK---: %d \n", i);
-        // printf("HitCell: %d %d %d\n", (int)results.HitCell.x, (int)results.HitCell.y, (int)results.HitCell.z);
-        // printf("HitIntersectedPoint: %f %f %f\n", results.HitIntersectedPoint.x, results.HitIntersectedPoint.y,
-        // results.HitIntersectedPoint.z); printf("NextCell: %f %f %f\n", results.NextCell.x, results.NextCell.y,
-        // results.NextCell.z); printf("Hit: %d\n", results.hit); printf("isOutOfBounds: %d\n", results.isOutOfBounds);
-        // printf("stepsTaken: %d\n", results.stepsTaken);
-        // printf("start: %f %f %f\n", start.x, start.y, start.z);
-        //        }
 
         total_steps += results.stepsTaken;
         start_high_res = make_float3(results.HitIntersectedPoint.x * factor, results.HitIntersectedPoint.y * factor,
@@ -810,11 +789,6 @@ __device__ bool Raytrace(int maxSteps, float3 origin, float3 ray, VoxelBuffer<3>
             if (previous_cell.x == results.HitCell.x && previous_cell.y == results.HitCell.y &&
                 previous_cell.z == results.HitCell.z)
             {
-
-                // if (doDebugPrint) {
-                //     printf("Same cell\n");
-                // }
-
                 break;
             }
             previous_cell = results.HitCell;
@@ -836,18 +810,6 @@ __device__ bool Raytrace(int maxSteps, float3 origin, float3 ray, VoxelBuffer<3>
             DDARayResults<float3> results_hr;
             DDARayTraversal(params_hr, results_hr);
 
-            // if (doDebugPrint) {
-            //     printf("---VOXEL---:\n");
-            //     printf("HitCell: %d %d %d\n", (int)results_hr.HitCell.x, (int)results_hr.HitCell.y,
-            //     (int)results_hr.HitCell.z); printf("HitIntersectedPoint: %f %f %f\n",
-            //     results_hr.HitIntersectedPoint.x, results_hr.HitIntersectedPoint.y,
-            //     results_hr.HitIntersectedPoint.z); printf("NextCell: %f %f %f\n", results_hr.NextCell.x,
-            //     results_hr.NextCell.y, results_hr.NextCell.z); printf("Hit: %d\n", results_hr.hit);
-            //     printf("isOutOfBounds: %d\n", results_hr.isOutOfBounds);
-            //     printf("stepsTaken: %d\n", results_hr.stepsTaken);
-            //     printf("start: %f %f %f\n", start_high_res.x, start_high_res.y, start_high_res.z);
-            // }
-
             total_steps += results_hr.stepsTaken;
             hitPosition = make_float3(results_hr.HitIntersectedPoint.x + results.HitCell.x * factor,
                                       results_hr.HitIntersectedPoint.y + results.HitCell.y * factor,
@@ -859,10 +821,6 @@ __device__ bool Raytrace(int maxSteps, float3 origin, float3 ray, VoxelBuffer<3>
                 start.x /= factor;
                 start.y /= factor;
                 start.z /= factor;
-
-                // if (doDebugPrint) {
-                //     printf("Next start: %f %f %f\n", start.x, start.y, start.z);
-                // }
 
                 if (results_hr.isOutOfBounds)
                 {
@@ -921,10 +879,6 @@ __device__ bool Raytrace(int maxSteps, float3 origin, float3 ray, VoxelBuffer<3>
                     }
                 }
 
-                //              if (doDebugPrint) {
-                // printf("Adjusted Next start: %f %f %f\n", start.x, start.y, start.z);
-                //              }
-                //              i++;
                 continue;
             }
             else
@@ -944,19 +898,9 @@ __device__ bool Raytrace(int maxSteps, float3 origin, float3 ray, VoxelBuffer<3>
         }
         else
         {
-
-            // if (doDebugPrint) {
-            //     printf("results.hit false, results.isOutOfBounds true");
-            // }
-
             break;
         }
-        // i++;
     }
-
-    // if (doDebugPrint) {
-    //	printf("----------END-----------\n");
-    // }
 
     out_steps = total_steps;
     if (hit)
