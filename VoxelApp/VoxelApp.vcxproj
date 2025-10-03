@@ -24,6 +24,7 @@
     <ProjectGuid>{4d69af2c-c3ec-417e-8ae7-1d5d3bffb817}</ProjectGuid>
     <RootNamespace>DDARaytracer</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>VoxelApp</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -71,6 +72,12 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(ProjectDir)..\VoxelRT\;$(ProjectDir)..\SDLRenderer\;%(Include)</IncludePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(ProjectDir)..\VoxelRT\;$(ProjectDir)..\SDLRenderer\;%(Include)</IncludePath>
+  </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
@@ -118,6 +125,7 @@
       <FastMath>true</FastMath>
       <GenerateRelocatableDeviceCode>true</GenerateRelocatableDeviceCode>
       <ExtensibleWholeProgramCompilation>false</ExtensibleWholeProgramCompilation>
+      <Include>$(ProjectDir)..\VoxelRT\;$(ProjectDir)..\SDLRenderer\;%(Include)</Include>
     </CudaCompile>
     <CudaLink>
       <PerformDeviceLink>true</PerformDeviceLink>
@@ -146,17 +154,18 @@
       <FastMath>true</FastMath>
       <GenerateRelocatableDeviceCode>true</GenerateRelocatableDeviceCode>
       <ExtensibleWholeProgramCompilation>false</ExtensibleWholeProgramCompilation>
+      <Include>$(ProjectDir)..\VoxelRT\;$(ProjectDir)..\SDLRenderer\;%(Include)</Include>
     </CudaCompile>
     <CudaLink>
       <PerformDeviceLink>true</PerformDeviceLink>
     </CudaLink>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ProjectReference Include="..\GPUDDA\GPUDDA.vcxproj">
-      <Project>{35cd9df1-b607-91a9-1e0e-3a390c53a9d7}</Project>
-    </ProjectReference>
     <ProjectReference Include="..\SDLRenderer\SDLRenderer.vcxproj">
       <Project>{55bc96d4-39fa-46aa-b811-379b56b83eaf}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\VoxelRT\VoxelRT.vcxproj">
+      <Project>{35cd9df1-b607-91a9-1e0e-3a390c53a9d7}</Project>
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>

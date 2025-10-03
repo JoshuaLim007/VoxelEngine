@@ -27,6 +27,7 @@
     <ProjectGuid>{35CD9DF1-B607-91A9-1E0E-3A390C53A9D7}</ProjectGuid>
     <RootNamespace>GPUDDA</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>VoxelRT</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">

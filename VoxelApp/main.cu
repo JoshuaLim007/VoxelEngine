@@ -2,10 +2,10 @@
 //
 
 #include <iostream>
-#include "../SDLRenderer/SDLRenderer.h"
-#include "../GPUDDA/DDA.cuh"
-#include "../GPUDDA/Raytracer.cuh"
-#include "../GPUDDA/VoxelWorldBuilder.cuh"
+#include "SDLRenderer.h"
+#include "DDA.cuh"
+#include "Raytracer.cuh"
+#include "VoxelWorldBuilder.cuh"
 #include <fstream>
 #include <sstream>
 
