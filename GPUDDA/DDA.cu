@@ -452,7 +452,20 @@ namespace GPUDDA {
 		}
 	}
 
-    __device__ bool ray_intersects_aabb(float3 start, float3 direction, float3 bmin, float3 bmax, float3* out_intersect, float3* out_normal) {
+    __device__ bool aabb_contains(const float3& pos, const float3& min, const float3& max) {
+        return pos.x >= min.x && pos.x <= max.x &&
+               pos.y >= min.y && pos.y <= max.y &&
+               pos.z >= min.z && pos.z <= max.z;    
+    }
+    
+    __device__ bool ray_intersects_aabb(
+        const float3& start, 
+        const float3& direction, 
+        const float3& bmin, 
+        const float3& bmax, 
+        float3* out_intersect, 
+        float3* out_normal) 
+    {
         float inv_dir_x = 1.0f / (direction.x == 0 ? FLT_EPS : direction.x);
         float inv_dir_y = 1.0f / (direction.y == 0 ? FLT_EPS : direction.y);
         float inv_dir_z = 1.0f / (direction.z == 0 ? FLT_EPS : direction.z);
@@ -497,7 +510,7 @@ namespace GPUDDA {
     }
 
     __device__ void dda_ray_traversal(
-        DDARayParams<float3, 3> Params,
+        const DDARayParams<float3, 3>& Params,
         DDARayResults<float3>& Results
     ) {
         float x = Params.start.x;
@@ -576,8 +589,9 @@ namespace GPUDDA {
                             float temp_y = Params.start.y * Params.per_voxel_bounds_scale;
                             float temp_z = Params.start.z * Params.per_voxel_bounds_scale;
                             float3 aabb_normal = make_float3(0, 0, 0);
+                            float3 aabb_pos = make_float3(0, 0, 0);
                             if (ray_intersects_aabb(make_float3(temp_x, temp_y, temp_z), Params.direction,
-                                make_float3(bmin_x, bmin_y, bmin_z), make_float3(bmax_x, bmax_y, bmax_z), nullptr, &aabb_normal)) {
+                                make_float3(bmin_x, bmin_y, bmin_z), make_float3(bmax_x, bmax_y, bmax_z), &aabb_pos, &aabb_normal)) {
                                 Results.hit = true;
                                 if (step == 0) {
                                     Results.HitNormal = aabb_normal;
@@ -654,32 +668,23 @@ namespace GPUDDA {
             }
         }
     }
+
+    //__device__ bool debugPrint;
+    //__device__ void DebugPrint(bool val) {
+    //    debugPrint = val;
+    //}
+
     __device__ bool raytrace(int maxSteps, float3 origin, float3 ray, VoxelBuffer<3> chunks, VoxelBuffer<3>* chunksData, Bounds<float3>* chunkBoundingBoxes, int factor,
         int& out_steps, float3& out_normal, float3& out_pos) {
         
-        float rayLen = sqrt(ray.x * ray.x + ray.y * ray.y + ray.z * ray.z);
-        ray.x /= rayLen;
-        ray.y /= rayLen;
-        ray.z /= rayLen;
         float3 previous_cell = make_float3(-1, -1, -1);
         int total_steps = 0;
-        //in chunk space
+
         float3 start = origin;
-
-        //prevent starting on a chunk border
-        if (start.x == factor) {
-            start.x -= FLT_EPS_DDA;
-        }
-        if (start.y == factor) {
-            start.y -= FLT_EPS_DDA;
-        }
-        if (start.z == factor) {
-            start.z -= FLT_EPS_DDA;
-        }
-
         start.x /= factor;
         start.y /= factor;
         start.z /= factor;
+
         float3 direction = normalize(ray);
 		float3 start_normal = make_float3(0, 0, 0);
         if (!(start.x >= 0 && start.y >= 0 && start.z >= 0 && start.x < chunks.dimensions[0] && start.y < chunks.dimensions[1] && start.z < chunks.dimensions[2])) {
@@ -697,20 +702,31 @@ namespace GPUDDA {
 		out_normal = make_float3(0, 0, 0);
         float3 hitPosition = make_float3(0, 0, 0);
         bool hit = false;
-        bool skipInitial = false;
-
-        //if center of screen
-        auto tx = threadIdx.x + blockIdx.x * blockDim.x;
-        auto ty = threadIdx.y + blockIdx.y * blockDim.y;
+   //     auto tx = threadIdx.x + blockIdx.x * blockDim.x;
+   //     auto ty = threadIdx.y + blockIdx.y * blockDim.y;
+   //     bool doDebugPrint = tx == 1920 >> 1 && ty == 1080 >> 1 && debugPrint;
+   //     if (doDebugPrint) {
+			//printf("----------START-----------\n");
+   //     }
+        //int i = 0;
         while (total_steps < maxSteps) {
             float3 start_high_res;
             DDARayParams<float3, 3> params = DDARayParams<float3, 3>::Default(chunks, start, direction);
-            params.takeInitialStep = skipInitial;
             params.per_voxel_bounds = chunkBoundingBoxes;
             params.per_voxel_bounds_scale = factor;
             DDARayResults<float3> results;
             dda_ray_traversal(params, results);
-            skipInitial = false;
+
+    //        if (doDebugPrint) {
+    //            printf("---CHUNK---: %d \n", i);
+				//printf("HitCell: %d %d %d\n", (int)results.HitCell.x, (int)results.HitCell.y, (int)results.HitCell.z);
+				//printf("HitIntersectedPoint: %f %f %f\n", results.HitIntersectedPoint.x, results.HitIntersectedPoint.y, results.HitIntersectedPoint.z);
+				//printf("NextCell: %f %f %f\n", results.NextCell.x, results.NextCell.y, results.NextCell.z);
+				//printf("Hit: %d\n", results.hit);
+				//printf("isOutOfBounds: %d\n", results.isOutOfBounds);
+				//printf("stepsTaken: %d\n", results.stepsTaken);
+				//printf("start: %f %f %f\n", start.x, start.y, start.z);
+    //        }
 
             total_steps += results.stepsTaken;
             start_high_res = make_float3(results.HitIntersectedPoint.x * factor, results.HitIntersectedPoint.y * factor, results.HitIntersectedPoint.z * factor);
@@ -720,6 +736,11 @@ namespace GPUDDA {
                 if (previous_cell.x == results.HitCell.x && 
                     previous_cell.y == results.HitCell.y && 
                     previous_cell.z == results.HitCell.z) {
+
+                    //if (doDebugPrint) {
+                    //    printf("Same cell\n");
+                    //}
+
                     break;
                 }
                 previous_cell = results.HitCell;
@@ -739,6 +760,17 @@ namespace GPUDDA {
                 DDARayResults<float3> results_hr;
                 dda_ray_traversal(params_hr, results_hr);
 
+                //if (doDebugPrint) {
+                //    printf("---VOXEL---:\n");
+                //    printf("HitCell: %d %d %d\n", (int)results_hr.HitCell.x, (int)results_hr.HitCell.y, (int)results_hr.HitCell.z);
+                //    printf("HitIntersectedPoint: %f %f %f\n", results_hr.HitIntersectedPoint.x, results_hr.HitIntersectedPoint.y, results_hr.HitIntersectedPoint.z);
+                //    printf("NextCell: %f %f %f\n", results_hr.NextCell.x, results_hr.NextCell.y, results_hr.NextCell.z);
+                //    printf("Hit: %d\n", results_hr.hit);
+                //    printf("isOutOfBounds: %d\n", results_hr.isOutOfBounds);
+                //    printf("stepsTaken: %d\n", results_hr.stepsTaken);
+                //    printf("start: %f %f %f\n", start_high_res.x, start_high_res.y, start_high_res.z);
+                //}
+
                 total_steps += results_hr.stepsTaken;
                 hitPosition = make_float3(
                     results_hr.HitIntersectedPoint.x + results.HitCell.x * factor,
@@ -747,26 +779,72 @@ namespace GPUDDA {
                 );
                 
                 if (!results_hr.hit) {
-                    start = make_float3(
-                        results_hr.HitIntersectedPoint.x + results.HitCell.x * factor,
-                        results_hr.HitIntersectedPoint.y + results.HitCell.y * factor,
-                        results_hr.HitIntersectedPoint.z + results.HitCell.z * factor
-                    );
+                    start = hitPosition;
                     start.x /= factor;
                     start.y /= factor;
                     start.z /= factor;
+
+                    //if (doDebugPrint) {
+                    //    printf("Next start: %f %f %f\n", start.x, start.y, start.z);
+                    //}
 
                     if (results_hr.isOutOfBounds) {
                         //projected cell
                         int cx = static_cast<int>(start.x);
                         int cy = static_cast<int>(start.y);
                         int cz = static_cast<int>(start.z);
-                        if (cx == results.HitCell.x &&
-                            cy == results.HitCell.y &&
-                            cz == results.HitCell.z) {
-                            skipInitial = true;
+						bool projectedCellIsSame = results.HitCell.x == cx && results.HitCell.y == cy && results.HitCell.z == cz;
+
+                        //apply the smallest diff to start
+                        if (projectedCellIsSame) {
+
+                            //first apply eps to see if it crosses chunk border
+                            if (results.HitCell.x == cx) {
+                                start.x = direction.x < 0 ? nextafterf(start.x, -FLT_INF) : nextafterf(start.x, FLT_INF);
+                            }
+                            if (results.HitCell.y == cy) {
+                                start.y = direction.y < 0 ? nextafterf(start.y, -FLT_INF) : nextafterf(start.y, FLT_INF);
+                            }
+                            if (results.HitCell.z == cz) {
+                                start.z = direction.z < 0 ? nextafterf(start.z, -FLT_INF) : nextafterf(start.z, FLT_INF);
+                            }
+
+                            //projected cell
+                            int cx = static_cast<int>(start.x);
+                            int cy = static_cast<int>(start.y);
+                            int cz = static_cast<int>(start.z);
+                            projectedCellIsSame = results.HitCell.x == cx && results.HitCell.y == cy && results.HitCell.z == cz;
+
+							//if projected cell is still the same, apply the smallest diff
+                            if (projectedCellIsSame) {
+                                //find the smallest diff to the next cell
+                                float3 diff = make_float3(
+                                    results.NextCell.x - start.x,
+                                    results.NextCell.y - start.y,
+                                    results.NextCell.z - start.z
+                                );
+                                float3 absDiff = make_float3(
+                                    fabsf(diff.x),
+                                    fabsf(diff.y),
+                                    fabsf(diff.z)
+                                );
+                                if (absDiff.x < absDiff.y && absDiff.x < absDiff.z) {
+                                    start.x += diff.x;
+                                }
+                                else if (absDiff.y < absDiff.x && absDiff.y < absDiff.z) {
+                                    start.y += diff.y;
+                                }
+                                else {
+                                    start.z += diff.z;
+                                }
+                            }
                         }
                     }
+
+      //              if (doDebugPrint) {
+						//printf("Adjusted Next start: %f %f %f\n", start.x, start.y, start.z);
+      //              }
+      //              i++;
                     continue;
                 }
                 else {
@@ -782,9 +860,20 @@ namespace GPUDDA {
                 }
             }
             else {
+
+                //if (doDebugPrint) {
+                //    printf("results.hit false, results.isOutOfBounds true");
+                //}
+
                 break;
             }
+            //i++;
         }
+
+		//if (doDebugPrint) {
+		//	printf("----------END-----------\n");
+		//}
+
         out_steps = total_steps;
         if (hit) {
             out_pos = hitPosition;

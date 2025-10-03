@@ -23,7 +23,6 @@ bool Renderer::init(int width, int height) {
         height,                    // Height
         SDL_WINDOW_SHOWN        // Flags
     );
-
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     tex = SDL_CreateTexture(renderer, SDL_PixelFormatEnum::SDL_PIXELFORMAT_ARGB8888, SDL_TextureAccess::SDL_TEXTUREACCESS_STREAMING, width * texScale, height * texScale);
     SDL_SetTextureScaleMode(tex, SDL_ScaleMode::SDL_ScaleModeLinear);
