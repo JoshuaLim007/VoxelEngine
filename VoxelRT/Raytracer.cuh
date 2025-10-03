@@ -36,9 +36,9 @@ namespace GPUDDA
 			float3 AmbientColor;
 		};
 
-		__host__ __device__ void getDirections(float3 eularAngles, float3* forwad, float3* up, float3* right);
+		__host__ __device__ void GetDirections(float3 eularAngles, float3* forwad, float3* up, float3* right);
 
-		void SetEnvironment(const Environment &env);
+		void SetEnvironment(const Environment& env);
 
 		void SetFOV(float fov);
 

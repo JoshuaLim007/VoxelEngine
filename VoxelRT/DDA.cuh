@@ -24,7 +24,7 @@ namespace GPUDDA {
 		T min; // minimum bounds
 		T max; // maximum bounds
 	};
-	
+
 	template <typename T>
 	class RayTraceResults {
 	public:
@@ -49,14 +49,14 @@ namespace GPUDDA {
 		}
 
 	};
-	
+
 	struct BitRef {
 		uint8_t* byte = nullptr;
 		size_t index = 0;
 		__device__ __host__ operator bool() const;
 		__device__ __host__ BitRef& operator=(bool value);
 	};
-	
+
 	struct BitArray {
 	private:
 		size_t size = 0;
@@ -68,9 +68,9 @@ namespace GPUDDA {
 		__device__ __host__ BitArray(size_t num_bits, bool isGPU);
 		__device__ __host__ bool operator[](size_t index) const;
 		__device__ __host__ BitRef operator[](size_t index);
-		__device__ __host__ uint8_t* raw();
-		__device__ __host__ size_t bit_size() const;
-		__device__ __host__ size_t byte_size() const;
+		__device__ __host__ uint8_t* Raw();
+		__device__ __host__ size_t BitSize() const;
+		__device__ __host__ size_t ByteSize() const;
 	};
 
 	std::ostream& operator<<(std::ostream& os, const BitArray& bits);
@@ -80,7 +80,7 @@ namespace GPUDDA {
 		BitArray grid{};
 		uint16_t dimensions[D]{};
 	};
-	
+
 	constexpr size_t MAX_STEPS = 2048;
 
 	template<typename T, size_t N>
@@ -124,27 +124,27 @@ namespace GPUDDA {
 		int stepsTaken;
 	};
 
-	__device__ bool ray_intersects_aabb(float2 start, float2 direction, float2 bmin, float2 bmax, float2* out_intersect, float2* out_normal);
-	__device__ bool ray_intersects_aabb(
-		const float3& start, 
-		const float3& direction, 
-		const float3& bmin, 
+	__device__ bool RayIntersectsAABB(float2 start, float2 direction, float2 bmin, float2 bmax, float2* out_intersect, float2* out_normal);
+	__device__ bool RayIntersectsAABB(
+		const float3& start,
+		const float3& direction,
+		const float3& bmin,
 		const float3& bmax, float3* out_intersect, float3* out_normal);
 
-	__device__ void dda_ray_traversal(
+	__device__ void DDARayTraversal(
 		const DDARayParams<float3, 3>& Params,
 		DDARayResults<float3>& Results
 	);
 
-	__device__ void dda_ray_traversal(
+	__device__ void DDARayTraversal(
 		DDARayParams<float2, 2> Params,
 		DDARayResults<float2>& Results
 	);
 
-	__device__ bool raytrace(int maxSteps, float3 origin, float3 ray, VoxelBuffer<3> chunks, VoxelBuffer<3>* chunksData, Bounds<float3>* chunkBoundingBoxes, int factor,
+	__device__ bool Raytrace(int maxSteps, float3 origin, float3 ray, VoxelBuffer<3> chunks, VoxelBuffer<3>* chunksData, Bounds<float3>* chunkBoundingBoxes, int factor,
 		int& out_steps, float3& out_normal, float3& out_hit);
 
-	__device__ float2 raytrace(float2 origin, float2 ray, VoxelBuffer<2> chunks, VoxelBuffer<2>* chunksData, Bounds<float2>* chunkBoundingBoxes, int factor,
+	__device__ float2 Raytrace(float2 origin, float2 ray, VoxelBuffer<2> chunks, VoxelBuffer<2>* chunksData, Bounds<float2>* chunkBoundingBoxes, int factor,
 		int& out_steps, float2& out_normal);
 
 	template<class T, size_t N>
@@ -185,7 +185,7 @@ namespace GPUDDA {
 		T* d_origins;
 		T* d_rays;
 		int factor = 1;
-	
+
 		// GPU resources
 		GPUDDA::VoxelBuffer<N>* gpu_VoxelBuffer = nullptr;
 		GPUDDA::VoxelBuffer<N>* gpu_VoxelBufferDatas = nullptr;
@@ -235,26 +235,26 @@ namespace GPUDDA {
 		virtual void UploadVoxelBufferDataBounds(Bounds<T>* bounds, size_t count) = 0;
 		virtual RayTraceResults<T> Raytrace(std::vector<T> origin, std::vector<T> ray) = 0;
 	};
-	
+
 	class VoxelRaytracer2D : public VoxelRayTracerBase<float2, 2> {
 	public:
-		VoxelRaytracer2D(size_t count) : VoxelRayTracerBase<float2, 2>(count){}
+		VoxelRaytracer2D(size_t count) : VoxelRayTracerBase<float2, 2>(count) {}
 		void UploadVoxelBuffer(const GPUDDA::VoxelBuffer<2>& buff) override;
 		void UploadVoxelBufferDatas(GPUDDA::VoxelBuffer<2>* buff, size_t count) override;
 		void UploadVoxelBufferDataBounds(Bounds<float2>* bounds, size_t count) override;
 		RayTraceResults<float2> Raytrace(std::vector<float2> origin, std::vector<float2> ray) override;
 	};
-	
+
 	class VoxelRaytracer3D : public VoxelRayTracerBase<float3, 3> {
 	public:
-		VoxelRaytracer3D(size_t count) : VoxelRayTracerBase<float3, 3>(count){}
+		VoxelRaytracer3D(size_t count) : VoxelRayTracerBase<float3, 3>(count) {}
 		void UploadVoxelBuffer(const GPUDDA::VoxelBuffer<3>& buff) override;
 		void UploadVoxelBufferDatas(GPUDDA::VoxelBuffer<3>* buff, size_t count) override;
 		void UploadVoxelBufferDataBounds(Bounds<float3>* bounds, size_t count) override;
 		RayTraceResults<float3> Raytrace(std::vector<float3> origin, std::vector<float3> ray) override;
 	};
 
-	struct ThreadParams{
+	struct ThreadParams {
 		size_t threadId = 0;
 		size_t maxCount = 0;
 		size_t countPerThread = 0;
@@ -310,8 +310,8 @@ namespace GPUDDA {
 					for (int dx = 0; dx < factor; ++dx) {
 						// Copy the data from the high-res buffer to the low-res buffer
 						temp->grid[static_cast<size_t>(dz) * factor * factor + static_cast<size_t>(dy) * factor + dx] =
-							high_res_buffer->grid[(static_cast<size_t>(z) * factor + dz) * high_res_buffer->dimensions[1] * 
-							high_res_buffer->dimensions[0] + (static_cast<size_t>(y) * factor + dy) * 
+							high_res_buffer->grid[(static_cast<size_t>(z) * factor + dz) * high_res_buffer->dimensions[1] *
+							high_res_buffer->dimensions[0] + (static_cast<size_t>(y) * factor + dy) *
 							high_res_buffer->dimensions[0] + (static_cast<size_t>(x) * factor + dx)];
 
 						// Check if the voxel is occupied
@@ -342,7 +342,7 @@ namespace GPUDDA {
 				temp->dimensions[0] = 0;
 				temp->dimensions[1] = 0;
 				temp->dimensions[2] = 0;
-				delete[] temp->grid.raw();
+				delete[] temp->grid.Raw();
 			}
 			auto idx = z * low_res_rows * low_res_cols + y * low_res_cols + x;
 			low_res_per_chunk_bounds[idx].max = make_float3(max_x, max_y, max_z);
@@ -356,8 +356,8 @@ namespace GPUDDA {
 		size_t low_res_rows = high_res_buffer.dimensions[1] / (size_t)factor;
 		size_t low_res_slices = high_res_buffer.dimensions[2] / (size_t)factor;
 		VoxelBuffer<3>* low_res_grid_data = new VoxelBuffer<3>[low_res_rows * low_res_cols * low_res_slices] {};
-		Bounds<float3>* low_res_per_chunk_bounds = new Bounds<float3>[low_res_rows * low_res_cols * low_res_slices]{};
-		
+		Bounds<float3>* low_res_per_chunk_bounds = new Bounds<float3>[low_res_rows * low_res_cols * low_res_slices] {};
+
 #if MULTI_THREADING == 0
 		BitArray low_res_grid = BitArray(low_res_rows * low_res_cols * low_res_slices);
 		for (size_t z = 0; z < low_res_slices; z++) {
@@ -382,8 +382,8 @@ namespace GPUDDA {
 							for (int dx = 0; dx < factor; ++dx) {
 								// Copy the data from the high-res buffer to the low-res buffer
 								temp->grid[static_cast<size_t>(dz) * factor * factor + static_cast<size_t>(dy) * factor + dx] =
-									high_res_buffer.grid[(static_cast<size_t>(z) * factor + dz) * high_res_buffer.dimensions[1] * 
-									high_res_buffer.dimensions[0] + (static_cast<size_t>(y) * factor + dy) * 
+									high_res_buffer.grid[(static_cast<size_t>(z) * factor + dz) * high_res_buffer.dimensions[1] *
+									high_res_buffer.dimensions[0] + (static_cast<size_t>(y) * factor + dy) *
 									high_res_buffer.dimensions[0] + (static_cast<size_t>(x) * factor + dx)];
 
 								// Check if the voxel is occupied
@@ -514,7 +514,7 @@ namespace GPUDDA {
 					max_y = -1;
 					temp->dimensions[0] = 0;
 					temp->dimensions[1] = 0;
-					delete[] temp->grid.raw();
+					delete[] temp->grid.Raw();
 				}
 
 				low_res_per_chunk_bounds[y * low_res_cols + x] = make_float4(min_x, min_y, max_x, max_y);

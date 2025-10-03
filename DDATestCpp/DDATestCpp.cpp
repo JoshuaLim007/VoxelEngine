@@ -23,7 +23,7 @@ using namespace GPUDDA;
 #ifdef RECORD_INTERSECTED_POINTS
 std::vector<float2> interSectedPoints = {};
 #endif
-void dda_ray_traversal(
+void DDARayTraversal(
     VoxelBuffer<2> VoxelBuffer,
     float2 start,
     float2 direction,
@@ -77,7 +77,7 @@ void dda_ray_traversal(
                 if (grid[cell_y * cols + cell_x] == 1 && bmin_x <= bmax_x) {
                     float temp_x = start.x * per_voxel_bounds_scale;
                     float temp_y = start.y * per_voxel_bounds_scale;
-                    if (ray_intersects_aabb(make_float2(temp_x, temp_y), direction, make_float2(bmin_x, bmin_y), make_float2(bmax_x, bmax_y), nullptr, nullptr)) {
+                    if (RayIntersectsAABB(make_float2(temp_x, temp_y), direction, make_float2(bmin_x, bmin_y), make_float2(bmax_x, bmax_y), nullptr, nullptr)) {
                         *out_hit = true;
                         break;
                     }
@@ -147,7 +147,7 @@ float2 Raytrace(float2 origin, float2 ray, VoxelBuffer<2> chunks, VoxelBuffer<2>
 	float eps = 1e-5;
     if (!(start.x >= 0 && start.y >= 0 && start.x < chunks.dimensions[1] && start.y < chunks.dimensions[0])) {
         float2 intersect;
-        if (ray_intersects_aabb(start, direction, make_float2(0, 0), make_float2(chunks.dimensions[1], chunks.dimensions[0]), &intersect, nullptr)) {
+        if (RayIntersectsAABB(start, direction, make_float2(0, 0), make_float2(chunks.dimensions[1], chunks.dimensions[0]), &intersect, nullptr)) {
 			if (intersect.x == chunks.dimensions[0])
                 intersect.x -= eps;
 			if (intersect.y == chunks.dimensions[1]) 
@@ -167,7 +167,7 @@ float2 Raytrace(float2 origin, float2 ray, VoxelBuffer<2> chunks, VoxelBuffer<2>
 #ifdef RECORD_INTERSECTED_POINTS
 		int sidx = interSectedPoints.size();
 #endif
-        dda_ray_traversal(chunks, start, direction, nullptr, 100, chunkBoundingBoxes, factor,
+        DDARayTraversal(chunks, start, direction, nullptr, 100, chunkBoundingBoxes, factor,
             &hit, &isOutOfBounds, &hitCell, &hitIntersectedPoint, &stepsTaken);
 #ifdef RECORD_INTERSECTED_POINTS
         for (size_t i = sidx; i < interSectedPoints.size(); i++)
@@ -210,7 +210,7 @@ float2 Raytrace(float2 origin, float2 ray, VoxelBuffer<2> chunks, VoxelBuffer<2>
 			if (start_high_res.y == factor)
 				start_high_res.y -= eps;
 
-            dda_ray_traversal(chunkData, start_high_res, direction, &chunkBounds, 100, nullptr, 0,
+            DDARayTraversal(chunkData, start_high_res, direction, &chunkBounds, 100, nullptr, 0,
                 &hit1, &isOutOfBounds1, &hitCell1, &hitIntersectedPoint1, &stepsTaken1);
 
 #ifdef RECORD_INTERSECTED_POINTS
@@ -289,7 +289,7 @@ int main() {
         infile >> temp;
 		grid[i] = (temp != 0);
     }
-    infile.close();
+    infile.Close();
 
     VoxelBuffer<2>* voxelBuffer = new VoxelBuffer<2>();
     voxelBuffer->grid = BitArray(grid.size());
@@ -301,7 +301,7 @@ int main() {
     int factor = 8;
     auto datas = createBuffersFromVoxels(*voxelBuffer, factor);
 
-	delete[] voxelBuffer->grid.raw();
+	delete[] voxelBuffer->grid.Raw();
     delete voxelBuffer;
     grid.clear();
 
@@ -574,7 +574,7 @@ int main() {
 
     closeSDL(window, renderer);
 
-    delete[] low_res_buffer.grid.raw();
+    delete[] low_res_buffer.grid.Raw();
     delete[] low_res_grid_data;
     delete[] low_res_chunk_bounds;
 
