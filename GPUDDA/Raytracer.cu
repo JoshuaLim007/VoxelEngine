@@ -105,7 +105,6 @@ __device__ float3 calculateColor(float3 camPos, float3 normal, float3 position,
 	float3 diffuse = lDot * g_env.LightColor;
 	float3 ambient = g_env.AmbientColor * lerp(0.25,1.0, dot(normal, make_float3(0, 1, 0)) * 0.5 + 0.5 );
 	float3 color = diffuse + ambient;
-	float dist = length(position - camPos);
 
 	//specular
 	if (!hit) {
@@ -118,13 +117,11 @@ __device__ float3 calculateColor(float3 camPos, float3 normal, float3 position,
 	}
 
 	//Ambient Occlusion
-	/*constexpr float maxAODist = 2048.0f;
-	float AOMix = fminf(fabsf(maxAODist - dist) * 0.1f, 1);
-	if (lDot == 0 && dist < maxAODist) {
-		constexpr int samples = 32;
+	if (lDot == 0) {
+		constexpr int samples = 0;
 		int x = blockIdx.x * blockDim.x + threadIdx.x;
 		int y = blockIdx.y * blockDim.y + threadIdx.y;
-		int seed = y * d_params.Resolution.x + x;
+		int seed = y * 1920 + x;
 		float occlusion = 0.0f;
 		for (int i = 0; i < samples; i++) {
 			int si = seed + i * 1000 + (d_params.FrameNumber + 1) * 1000;
@@ -142,13 +139,8 @@ __device__ float3 calculateColor(float3 camPos, float3 normal, float3 position,
 			bool hit = raytrace(8, samplePos, sampleDir, chunks[0], chunksData, chunkBoundingBoxes, factor, steps, sampleNormal, samplePos);
 			if (hit) {
 				float dist = length(samplePos - position);
-				if (dist < 16.0f) {
-					float occlusion = 1 - fminf(1 / (dist * 10.0f), 1.0f);
-					occlusion += occlusion;
-				}
-				else {
-					occlusion += 1.0f;
-				}
+				float occlusion = 1 - fminf(1 / (dist * 10.0f), 1.0f);
+				occlusion += occlusion;
 			}
 			else {
 				occlusion += 1.0f;
@@ -161,9 +153,9 @@ __device__ float3 calculateColor(float3 camPos, float3 normal, float3 position,
 		else {
 			occlusion = 1.0f;
 		}
-		occlusion = lerp(1.0f, occlusion, AOMix);
+
 		color *= occlusion;
-	}*/
+	}
 
 	return color;
 }
@@ -249,7 +241,7 @@ __global__ void screenDispatch(
 		//if center of screen
 		auto tx = threadIdx.x + blockIdx.x * blockDim.x;
 		auto ty = threadIdx.y + blockIdx.y * blockDim.y;
-		if (tx == d_params.Resolution.x >> 1 && ty == d_params.Resolution.y >> 1) {
+		if (tx == 1920 >> 1 && ty == 1080 >> 1) {
 			float3 color = make_float3(10, 10, 10);
 			setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(color.x, color.y, color.z));
 		}
@@ -292,7 +284,7 @@ void Graphics::RaytraceScreen(
 	float3 camera_up,
 	float3 camera_right) {
 
-	dim3 blockSize(16, 16, 1);
+	dim3 blockSize(8, 8, 1);
 	dim3 numBlocks((screen_width + blockSize.x - 1) / blockSize.x, (screen_height + blockSize.y - 1) / blockSize.y, 1);
 
 	auto buffer = rt->GetVoxelBuffer();

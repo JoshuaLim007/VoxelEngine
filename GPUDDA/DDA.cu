@@ -452,7 +452,7 @@ namespace GPUDDA {
 		}
 	}
 
-    __device__ bool ray_intersects_aabb(const float3& start, const float3 &direction, const float3 &bmin, const float3 &bmax, float3* out_intersect, float3* out_normal) {
+    __device__ bool ray_intersects_aabb(float3 start, float3 direction, float3 bmin, float3 bmax, float3* out_intersect, float3* out_normal) {
         float inv_dir_x = 1.0f / (direction.x == 0 ? FLT_EPS : direction.x);
         float inv_dir_y = 1.0f / (direction.y == 0 ? FLT_EPS : direction.y);
         float inv_dir_z = 1.0f / (direction.z == 0 ? FLT_EPS : direction.z);
@@ -529,12 +529,10 @@ namespace GPUDDA {
         float tMax_y = (dy != 0) ? (((cell_y + (step_y > 0)) - y) / dy) : FLT_INF;
         float tMax_z = (dz != 0) ? (((cell_z + (step_z > 0)) - z) / dz) : FLT_INF;
 
-        DDARayResults<float3> tResults;
-
-        tResults.HitIntersectedPoint = make_float3(x, y, z);
-        tResults.hit = false;
-        tResults.isOutOfBounds = false;
-        tResults.stepsTaken = 0;
+        Results.HitIntersectedPoint = make_float3(x, y, z);
+        Results.hit = false;
+        Results.isOutOfBounds = false;
+        Results.stepsTaken = 0;
 
         auto grid = Params.VoxelBuffer.grid;
         bool exit = false;
@@ -552,51 +550,53 @@ namespace GPUDDA {
 				edgePadding.z = 1;
 			}
         }
-        int maxSteps = Params.max_steps;
-        for (int step = 0; step < maxSteps; ++step) {
-            if (0 <= cell_x && cell_x < cols + edgePadding.x &&
-                0 <= cell_y && cell_y < rows + edgePadding.y &&
-                0 <= cell_z && cell_z < depth + edgePadding.z) {
 
-                int clamped_x = min(max(cell_x, 0), cols - 1);
-                int clamped_y = min(max(cell_y, 0), rows - 1);
-                int clamped_z = min(max(cell_z, 0), depth - 1);
-                tResults.HitCell = make_float3(clamped_x, clamped_y, clamped_z);
-                int idx = (clamped_z * rows * cols + clamped_y * cols + clamped_x);
-                bool isVoxel = grid[idx] == 1;
-                if (Params.per_voxel_bounds) {
-                    auto bounds = Params.per_voxel_bounds[idx];
-                    float bmin_x = bounds.min.x + clamped_x * Params.per_voxel_bounds_scale;
-                    float bmin_y = bounds.min.y + clamped_y * Params.per_voxel_bounds_scale;
-                    float bmin_z = bounds.min.z + clamped_z * Params.per_voxel_bounds_scale;
-                    float bmax_x = bounds.max.x + 1 + clamped_x * Params.per_voxel_bounds_scale;
-                    float bmax_y = bounds.max.y + 1 + clamped_y * Params.per_voxel_bounds_scale;
-                    float bmax_z = bounds.max.z + 1 + clamped_z * Params.per_voxel_bounds_scale;
-                    if (isVoxel && bmin_x <= bmax_x) {
-                        float temp_x = Params.start.x * Params.per_voxel_bounds_scale;
-                        float temp_y = Params.start.y * Params.per_voxel_bounds_scale;
-                        float temp_z = Params.start.z * Params.per_voxel_bounds_scale;
-                        float3 aabb_normal = make_float3(0, 0, 0);
-                        if (ray_intersects_aabb(make_float3(temp_x, temp_y, temp_z), Params.direction,
-                            make_float3(bmin_x, bmin_y, bmin_z), make_float3(bmax_x, bmax_y, bmax_z), nullptr, &aabb_normal)) {
-                            tResults.hit = true;
-                            if (step == 0) {
-                                tResults.HitNormal = aabb_normal;
+        for (int step = 0; step < Params.max_steps; ++step) {
+            bool skipCheck = Params.takeInitialStep == true && step == 0;
+
+            if (skipCheck == false) {
+                if (0 <= cell_x && cell_x < cols + edgePadding.x &&
+                    0 <= cell_y && cell_y < rows + edgePadding.y &&
+                    0 <= cell_z && cell_z < depth + edgePadding.z) {
+
+                    int clamped_x = min(max(cell_x, 0), cols - 1);
+                    int clamped_y = min(max(cell_y, 0), rows - 1);
+                    int clamped_z = min(max(cell_z, 0), depth - 1);
+                    Results.HitCell = make_float3(clamped_x, clamped_y, clamped_z);
+                    int idx = (clamped_z * rows * cols + clamped_y * cols + clamped_x);
+                    if (Params.per_voxel_bounds) {
+                        float bmin_x = Params.per_voxel_bounds[idx].min.x + clamped_x * Params.per_voxel_bounds_scale;
+                        float bmin_y = Params.per_voxel_bounds[idx].min.y + clamped_y * Params.per_voxel_bounds_scale;
+                        float bmin_z = Params.per_voxel_bounds[idx].min.z + clamped_z * Params.per_voxel_bounds_scale;
+                        float bmax_x = Params.per_voxel_bounds[idx].max.x + 1 + clamped_x * Params.per_voxel_bounds_scale;
+                        float bmax_y = Params.per_voxel_bounds[idx].max.y + 1 + clamped_y * Params.per_voxel_bounds_scale;
+                        float bmax_z = Params.per_voxel_bounds[idx].max.z + 1 + clamped_z * Params.per_voxel_bounds_scale;
+                        if (grid[idx] == 1 && bmin_x <= bmax_x) {
+                            float temp_x = Params.start.x * Params.per_voxel_bounds_scale;
+                            float temp_y = Params.start.y * Params.per_voxel_bounds_scale;
+                            float temp_z = Params.start.z * Params.per_voxel_bounds_scale;
+                            float3 aabb_normal = make_float3(0, 0, 0);
+                            if (ray_intersects_aabb(make_float3(temp_x, temp_y, temp_z), Params.direction,
+                                make_float3(bmin_x, bmin_y, bmin_z), make_float3(bmax_x, bmax_y, bmax_z), nullptr, &aabb_normal)) {
+                                Results.hit = true;
+                                if (step == 0) {
+                                    Results.HitNormal = aabb_normal;
+                                }
+                                exit = true;
                             }
+                        }
+                    }
+                    else {
+                        if (grid[idx] == 1) {
+                            Results.hit = true;
                             exit = true;
                         }
                     }
                 }
                 else {
-                    if (isVoxel) {
-                        tResults.hit = true;
-                        exit = true;
-                    }
+                    Results.isOutOfBounds = true;
+                    exit = true;
                 }
-            }
-            else {
-                tResults.isOutOfBounds = true;
-                exit = true;
             }
 
             float intersect_x = 0;
@@ -609,7 +609,7 @@ namespace GPUDDA {
                 cell_x += step_x;
                 tMax_x += tDelta_x;
                 if (!exit) 
-                    tResults.HitNormal = make_float3(step_x, 0, 0);
+                    Results.HitNormal = make_float3(step_x, 0, 0);
             }
             else if (tMax_y <= tMax_x && tMax_y < tMax_z) {
                 intersect_x = x + (tMax_y * dx);
@@ -618,7 +618,7 @@ namespace GPUDDA {
                 cell_y += step_y;
                 tMax_y += tDelta_y;
                 if (!exit) 
-                    tResults.HitNormal = make_float3(0, step_y, 0);
+                    Results.HitNormal = make_float3(0, step_y, 0);
             }
             else {
                 intersect_x = x + (tMax_z * dx);
@@ -627,7 +627,7 @@ namespace GPUDDA {
                 cell_z += step_z;
                 tMax_z += tDelta_z;
                 if (!exit) 
-                    tResults.HitNormal = make_float3(0, 0, step_z);
+                    Results.HitNormal = make_float3(0, 0, step_z);
             }
             if (!exit) {
                 if (Params.bounds) {
@@ -640,20 +640,19 @@ namespace GPUDDA {
                     // Check if the intersection point is within the bounds
                     bool isOutOfBounds = (intersect_x < min_x || intersect_x > max_x || intersect_y < min_y || intersect_y > max_y || intersect_z < min_z || intersect_z > max_z);
                     if (isOutOfBounds) {
-                        tResults.isOutOfBounds = true;
+                        Results.isOutOfBounds = true;
                         break;
                     }
                 }
-                tResults.stepsTaken += 1;
-                tResults.HitIntersectedPoint = make_float3(intersect_x, intersect_y, intersect_z);
+                Results.stepsTaken += 1;
+                Results.HitIntersectedPoint = make_float3(intersect_x, intersect_y, intersect_z);
             }
             else {
-                tResults.NextCell = make_float3(cell_x, cell_y, cell_z);
-                tResults.NextInterSectedPoint = make_float3(intersect_x, intersect_y, intersect_z);
+				Results.NextCell = make_float3(cell_x, cell_y, cell_z);
+				Results.NextInterSectedPoint = make_float3(intersect_x, intersect_y, intersect_z);
                 break;
             }
         }
-        Results = tResults;
     }
     __device__ bool raytrace(int maxSteps, float3 origin, float3 ray, VoxelBuffer<3> chunks, VoxelBuffer<3>* chunksData, Bounds<float3>* chunkBoundingBoxes, int factor,
         int& out_steps, float3& out_normal, float3& out_pos) {
@@ -665,11 +664,22 @@ namespace GPUDDA {
         float3 previous_cell = make_float3(-1, -1, -1);
         int total_steps = 0;
         //in chunk space
-        float invFactor = 1.0f / factor;
         float3 start = origin;
-        start.x *= invFactor;
-        start.y *= invFactor;
-        start.z *= invFactor;
+
+        //prevent starting on a chunk border
+        if (start.x == factor) {
+            start.x -= FLT_EPS_DDA;
+        }
+        if (start.y == factor) {
+            start.y -= FLT_EPS_DDA;
+        }
+        if (start.z == factor) {
+            start.z -= FLT_EPS_DDA;
+        }
+
+        start.x /= factor;
+        start.y /= factor;
+        start.z /= factor;
         float3 direction = normalize(ray);
 		float3 start_normal = make_float3(0, 0, 0);
         if (!(start.x >= 0 && start.y >= 0 && start.z >= 0 && start.x < chunks.dimensions[0] && start.y < chunks.dimensions[1] && start.z < chunks.dimensions[2])) {
@@ -687,14 +697,20 @@ namespace GPUDDA {
 		out_normal = make_float3(0, 0, 0);
         float3 hitPosition = make_float3(0, 0, 0);
         bool hit = false;
+        bool skipInitial = false;
 
+        //if center of screen
+        auto tx = threadIdx.x + blockIdx.x * blockDim.x;
+        auto ty = threadIdx.y + blockIdx.y * blockDim.y;
         while (total_steps < maxSteps) {
             float3 start_high_res;
             DDARayParams<float3, 3> params = DDARayParams<float3, 3>::Default(chunks, start, direction);
+            params.takeInitialStep = skipInitial;
             params.per_voxel_bounds = chunkBoundingBoxes;
             params.per_voxel_bounds_scale = factor;
             DDARayResults<float3> results;
             dda_ray_traversal(params, results);
+            skipInitial = false;
 
             total_steps += results.stepsTaken;
             start_high_res = make_float3(results.HitIntersectedPoint.x * factor, results.HitIntersectedPoint.y * factor, results.HitIntersectedPoint.z * factor);
@@ -731,61 +747,26 @@ namespace GPUDDA {
                 );
                 
                 if (!results_hr.hit) {
-                    start = hitPosition;
-                    start *= invFactor;
+                    start = make_float3(
+                        results_hr.HitIntersectedPoint.x + results.HitCell.x * factor,
+                        results_hr.HitIntersectedPoint.y + results.HitCell.y * factor,
+                        results_hr.HitIntersectedPoint.z + results.HitCell.z * factor
+                    );
+                    start.x /= factor;
+                    start.y /= factor;
+                    start.z /= factor;
 
-                    bool firstPass = false;
-
-                    //push towards next cell if voxel dda ended on chunk border
                     if (results_hr.isOutOfBounds) {
-                        float cx = floorf(start.x);
-                        float cy = floorf(start.y);
-                        float cz = floorf(start.z);
-                        if (results.HitCell.x == cx) {
-                            firstPass = true;
-                            start.x = direction.x < 0 ? nextafterf(start.x, -FLT_INF) : start.x;
-                        }
-                        if (results.HitCell.y == cy) {
-                            firstPass = true;
-                            start.y = direction.y < 0 ? nextafterf(start.y, -FLT_INF) : start.y;
-                        }
-                        if (results.HitCell.z == cz) {
-                            firstPass = true;
-                            start.z = direction.z < 0 ? nextafterf(start.z, -FLT_INF) : start.z;
+                        //projected cell
+                        int cx = static_cast<int>(start.x);
+                        int cy = static_cast<int>(start.y);
+                        int cz = static_cast<int>(start.z);
+                        if (cx == results.HitCell.x &&
+                            cy == results.HitCell.y &&
+                            cz == results.HitCell.z) {
+                            skipInitial = true;
                         }
                     }
-
-                    //if still in same cell, find smallest diff to next cell
-                    if (firstPass) {
-                        float cx = floorf(start.x);
-                        float cy = floorf(start.y);
-                        float cz = floorf(start.z);
-                        if (cx == results.HitCell.x && cy == results.HitCell.y && cz == results.HitCell.z) {
-                            //find smallest diff to next cell
-                            float3 diff = make_float3(
-                                results.NextCell.x - start.x,
-                                results.NextCell.y - start.y,
-                                results.NextCell.z - start.z
-                            );
-
-                            float3 absDiff = make_float3(
-                                fabsf(diff.x),
-                                fabsf(diff.y),
-                                fabsf(diff.z)
-                            );
-
-                            if (absDiff.x < absDiff.y && absDiff.x < absDiff.z) {
-                                start.x += diff.x;
-                            }
-                            else if (absDiff.y < absDiff.x && absDiff.y < absDiff.z) {
-                                start.y += diff.y;
-                            }
-                            else {
-                                start.z += diff.z;
-                            }
-                        }
-                    }
-
                     continue;
                 }
                 else {

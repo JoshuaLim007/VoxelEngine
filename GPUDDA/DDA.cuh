@@ -92,6 +92,7 @@ namespace GPUDDA {
 		int max_steps;
 		Bounds<T>* per_voxel_bounds;
 		int per_voxel_bounds_scale;
+		bool takeInitialStep;
 
 		__device__ __host__ static DDARayParams Default(
 			const GPUDDA::VoxelBuffer<N>& buffer,
@@ -106,6 +107,7 @@ namespace GPUDDA {
 			Params.max_steps = MAX_STEPS;
 			Params.per_voxel_bounds = nullptr;
 			Params.per_voxel_bounds_scale = 0;
+			Params.takeInitialStep = false;
 			return Params;
 		}
 	};
@@ -123,7 +125,7 @@ namespace GPUDDA {
 	};
 
 	__device__ bool ray_intersects_aabb(float2 start, float2 direction, float2 bmin, float2 bmax, float2* out_intersect, float2* out_normal);
-	__device__ bool ray_intersects_aabb(const float3& start, const float3& direction, const float3& bmin, const float3& bmax, float3* out_intersect, float3* out_normal);
+	__device__ bool ray_intersects_aabb(float3 start, float3 direction, float3 bmin, float3 bmax, float3* out_intersect, float3* out_normal);
 
 	__device__ void dda_ray_traversal(
 		DDARayParams<float3, 3> Params,
