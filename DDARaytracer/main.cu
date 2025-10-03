@@ -149,38 +149,8 @@ int main()
 			cam_pos += cam_up * cam_speed;
 		}
 
-		if (currentKeyStates[SDL_SCANCODE_R]) {
-			//read from text file 
-			std::fstream file("C:\\Users\\joshu\\Desktop\\camData.txt", std::ios::in);
-			//first line contains rotation
-			std::string line;
-			std::getline(file, line);
-			std::istringstream iss(line);
-			std::string token;
-			std::getline(iss, token, ',');
-			cam_eular.x = std::stof(token);
-			std::getline(iss, token, ',');
-			cam_eular.y = std::stof(token);
-			std::getline(iss, token, ',');
-			cam_eular.z = std::stof(token);
-			//second line contains position
-			std::getline(file, line);
-			std::istringstream iss2(line);
-			std::getline(iss2, token, ',');
-			cam_pos.x = std::stof(token);
-			std::getline(iss2, token, ',');
-			cam_pos.y = std::stof(token);
-			std::getline(iss2, token, ',');
-			cam_pos.z = std::stof(token);
-			file.close();
-
-			//cam_pos = { 138.252, 101.042, 503.197 };
-			//cam_eular = { -0.522997, 0.512, 0 };
-		}
-
 		std::cout << "Cam pos: " << cam_pos.x << ", " << cam_pos.y << ", " << cam_pos.z << std::endl;
 		std::cout << "Cam eular: " << cam_eular.x << ", " << cam_eular.y << ", " << cam_eular.z << std::endl;
-
 
 		static int last_x = 0, last_y = 0;
 		int x, y;
