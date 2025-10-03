@@ -71,7 +71,7 @@ int main()
 	raytracer->SetFactor(factor);
 
 	void* d_pixels;
-	float3 cam_pos = { 0, 0, 0 };
+	float3 cam_pos = { 256, 256, 256 };
 	float3 cam_up = { 0, 1, 0 };
 	float3 cam_right = { 1, 0, 0 };
 	float3 cam_forward = { 0, 0, 1 };
