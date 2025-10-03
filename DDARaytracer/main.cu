@@ -12,6 +12,9 @@
 using namespace GPUDDA::Graphics;
 using namespace GPUDDA;
 
+constexpr uint32_t width = 1280;
+constexpr uint32_t height = 720;
+
 VoxelBuffer<3> CreateVoxels(uint3 size) {
 	VoxelBuffer<3> voxels;
 	voxels.dimensions[0] = size.x;
@@ -40,7 +43,7 @@ int main()
 	//TODO: goal, 128k x 512 x 128k
 	int factor = 32;
 	auto t0 = std::chrono::high_resolution_clock::now();
-	auto buffer = CreateVoxels(make_uint3(2048, 512, 2048));
+	auto buffer = CreateVoxels(make_uint3(512, 512, 512));
 	auto t1 = std::chrono::high_resolution_clock::now();
 	auto td = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
 	std::cout << "Voxel generation time: " << td << "ms" << std::endl;
@@ -53,7 +56,7 @@ int main()
 
 	delete[] buffer.grid.raw();
 	Renderer renderer("SDL Window");
-	if (!renderer.init(1920, 1080)) {
+	if (!renderer.init(width, height)) {
 		return 1;
 	}
 
@@ -84,8 +87,8 @@ int main()
 	auto orthoWindowSize = make_float2(10, 10);
 	SetOrthoWindowSize(orthoWindowSize);
 
-	cudaMalloc(&d_pixels, 1920 * 1080 * sizeof(PixelData));
-	cudaMemset(d_pixels, 255, 1920 * 1080 * sizeof(PixelData));
+	cudaMalloc(&d_pixels, width * height * sizeof(PixelData));
+	cudaMemset(d_pixels, 255, width * height * sizeof(PixelData));
 	bool clicking = false;
 	renderer.AddRenderEventCallback([&](const CallbackData& data) {
 		SDL_Event e;
@@ -195,8 +198,8 @@ int main()
 		std::cout << "Cam Forward: " << cam_forward.x << ", " << cam_forward.y << ", " << cam_forward.z << std::endl;
 
 		getDirections(cam_eular, &cam_forward, &cam_up, &cam_right);
-		RaytraceScreen(raytracer, 1920, 1080, d_pixels, cam_pos, cam_forward, cam_up, cam_right);
-		cudaMemcpy(data.pixels, d_pixels, 1920 * 1080 * sizeof(PixelData), cudaMemcpyDeviceToHost);
+		RaytraceScreen(raytracer, width, height, d_pixels, cam_pos, cam_forward, cam_up, cam_right);
+		cudaMemcpy(data.pixels, d_pixels, width * height * sizeof(PixelData), cudaMemcpyDeviceToHost);
 		});
 
 	bool running = true;
