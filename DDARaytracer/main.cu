@@ -12,8 +12,8 @@
 using namespace GPUDDA::Graphics;
 using namespace GPUDDA;
 
-constexpr uint32_t width = 1280;
-constexpr uint32_t height = 720;
+constexpr uint32_t width = 1920;
+constexpr uint32_t height = 1080;
 
 VoxelBuffer<3> CreateVoxels(uint3 size) {
 	VoxelBuffer<3> voxels;
