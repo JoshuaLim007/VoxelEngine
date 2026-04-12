@@ -7,7 +7,7 @@
 #include <chrono>
 #include <iostream>
 #include "helper_math.h"
-#include "DDA.cuh"
+#include "VolumeRaytracer.cuh"
 
 //#define DEBUG_VIEW
 //#define ORTHO
@@ -44,7 +44,7 @@ namespace GPUDDA
 
 		void SetOrthoWindowSize(float2 windowSize);
 
-		void RaytraceScreen(
+		void RenderScreen(
 			VoxelRaytracer3D* rt,
 			uint32_t screen_width,
 			uint32_t screen_height,

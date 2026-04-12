@@ -1,8 +1,8 @@
 // DDARaytracer.cpp : This file contains the 'main' function. Program execution begins and ends there.
 //
 
-#include "DDA.cuh"
-#include "Raytracer.cuh"
+#include "VolumeRaytracer.cuh"
+#include "Renderer.cuh"
 #include "SDLRenderer.h"
 #include "VoxelWorldBuilder.cuh"
 #include <fstream>
@@ -12,31 +12,9 @@
 using namespace GPUDDA::Graphics;
 using namespace GPUDDA;
 
-constexpr uint32_t width = 1920;
-constexpr uint32_t height = 1080;
+constexpr uint32_t width = 1280;
+constexpr uint32_t height = 720;
 
-VoxelBuffer<3> CreateVoxels(uint3 size)
-{
-    VoxelBuffer<3> voxels;
-    voxels.dimensions[0] = size.x;
-    voxels.dimensions[1] = size.y;
-    voxels.dimensions[2] = size.z;
-    size_t buffer_size = static_cast<size_t>(size.x) * size.y * size.z;
-    voxels.grid = BitArray(buffer_size);
-
-    BitArray temp = BitArray(buffer_size, true);
-    auto threads = dim3(8, 8, 8);
-    auto scaled_size = make_uint3(size.x, size.y, size.z);
-    auto dim = dim3((scaled_size.x / 8 + threads.x - 1) / threads.x, (scaled_size.y + threads.y - 1) / threads.y,
-                    (scaled_size.z + threads.z - 1) / threads.z);
-
-    PopulateVoxels<<<dim, threads>>>(temp, scaled_size);
-    CUDA_SAFE_CALL(cudaDeviceSynchronize());
-    cudaMemcpy(voxels.grid.Raw(), temp.Raw(), temp.ByteSize(), cudaMemcpyDeviceToHost);
-    cudaFree(temp.Raw());
-
-    return voxels;
-}
 int main()
 {
     // TODO: goal, 128k x 512 x 128k
@@ -48,7 +26,7 @@ int main()
     std::cout << "Voxel generation time: " << td << "ms" << std::endl;
 
     auto t2 = std::chrono::high_resolution_clock::now();
-    auto buffers = createBuffersFromVoxels(buffer, factor);
+    auto buffers = GenerateLowresVoxelBuffer(buffer, factor);
     auto t3 = std::chrono::high_resolution_clock::now();
     auto td2 = std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count();
     std::cout << "Buffer generation time: " << td2 << "ms" << std::endl;
@@ -185,7 +163,7 @@ int main()
         std::cout << "Cam Forward: " << cam_forward.x << ", " << cam_forward.y << ", " << cam_forward.z << std::endl;
 
         GetDirections(cam_eular, &cam_forward, &cam_up, &cam_right);
-        RaytraceScreen(raytracer, width, height, d_pixels, cam_pos, cam_forward, cam_up, cam_right);
+        RenderScreen(raytracer, width, height, d_pixels, cam_pos, cam_forward, cam_up, cam_right);
         cudaMemcpy(data.pixels, d_pixels, width * height * sizeof(PixelData), cudaMemcpyDeviceToHost);
     });
 

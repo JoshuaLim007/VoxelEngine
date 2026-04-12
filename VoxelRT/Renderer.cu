@@ -1,6 +1,7 @@
-#include "Raytracer.cuh"
+#include "Renderer.cuh"
 #include "cuda_noise.cuh"
 using namespace GPUDDA;
+#define DEBUG_VIEW
 
 struct RenderParams
 {
@@ -87,8 +88,8 @@ __device__ void setPixelColor(void *screen_texture, uint32_t screen_width, uint3
 }
 
 __device__ Graphics::Environment g_env;
-__device__ float3 calculateColor(float3 camPos, float3 normal, float3 position, VoxelBuffer<3> *chunks,
-                                 VoxelBuffer<3> *chunksData, Bounds<float3> *chunkBoundingBoxes, int factor,
+__device__ float3 calculateColor(float3 camPos, float3 normal, float3 position, VoxelBuffer3D *chunks,
+                                 VoxelBuffer3D *chunksData, Bounds3Df *chunkBoundingBoxes, int factor,
                                  int &out_steps)
 {
     out_steps = 0;
@@ -180,7 +181,7 @@ __device__ float3 Tonemap(float3 color)
 __global__ void screenDispatch(float3 origin, float3 camera_fwd, float3 camera_up, float3 camera_right,
                                uint32_t screen_width, uint32_t screen_height, void *screen_texture,
 
-                               VoxelBuffer<3> *chunks, VoxelBuffer<3> *chunksData, Bounds<float3> *chunkBoundingBoxes,
+                               VoxelBuffer3D *chunks, VoxelBuffer3D *chunksData, Bounds3Df *chunkBoundingBoxes,
                                int factor)
 {
 
@@ -193,14 +194,12 @@ __global__ void screenDispatch(float3 origin, float3 camera_fwd, float3 camera_u
         float3 ray_dir;
         getRayDirectionOrtho(camera_fwd, camera_up, camera_right, uv, d_params.OrthoSize, origin, ray_dir, origin);
 #else
-        auto ray_dir = getRayDirection(camera_fwd, camera_up, camera_right, make_uint2(screen_width, screen_height),
-                                       make_float3(uv.x, uv.y, 0), d_params.Fov);
+        auto ray_dir = getRayDirection(camera_fwd, camera_up, camera_right, make_uint2(screen_width, screen_height), make_float3(uv.x, uv.y, 0), d_params.Fov);
 #endif
         int steps;
         float3 normal;
         float3 hitPos;
-        bool hit = Raytrace(MAX_STEPS, origin, ray_dir, chunks[0], chunksData, chunkBoundingBoxes, factor, steps,
-                            normal, hitPos);
+        bool hit = Raytrace(MAX_STEPS, origin, ray_dir, chunks[0], chunksData, chunkBoundingBoxes, factor, steps, normal, hitPos);
         normal = -normal;
         if (hit)
         {
@@ -213,28 +212,27 @@ __global__ void screenDispatch(float3 origin, float3 camera_fwd, float3 camera_u
             hitPos.y = fmodf(hitPos.y, 1.0f + FLT_EPS_DDA);
             hitPos.z = fmodf(hitPos.z, 1.0f + FLT_EPS_DDA);
 
-            ////top left
-            // if (x < screen_width >> 1 && y < screen_height >> 1) {
-            //	setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y,
-            // make_float3(normal.x, normal.y, normal.z));
-            // }
-            ////top right
-            // else if(x > screen_width >> 1 && y < screen_height >> 1){
-            //	setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y,
-            // make_float3(hitPos.x, hitPos.y, hitPos.z));
-            // }
-            ////bottom left
-            // else if (x < screen_width >> 1) {
-            //	//nothing
-            // }
-            ////bottom right
-            // else {
-            //	setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(dist *
-            // 0.01f, 0, 0));
-            // }
+            //top left
+            if (x < screen_width >> 1 && y < screen_height >> 1) {
+                setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y,
+                make_float3(normal.x, normal.y, normal.z));
+            }
+            //top right
+            else if(x > screen_width >> 1 && y < screen_height >> 1){
+                setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y,
+                make_float3(hitPos.x, hitPos.y, hitPos.z));
+            }
+            //bottom left
+            else if (x < screen_width >> 1) {
+           	//nothing
+            }
+            //bottom right
+            else {
+                setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(dist * 0.01f, 0, 0));
+            }
 
-            // setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y,
-            // make_float3(fmodf(dist, 1.0f),0,0));
+            setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y,
+            make_float3(fmodf(dist, 1.0f),0,0));
 
 #else
             int color_steps = 0;
@@ -263,8 +261,7 @@ __global__ void screenDispatch(float3 origin, float3 camera_fwd, float3 camera_u
         }
 
 #ifdef DEBUG_VIEW
-        setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y,
-                                          make_float3(steps / 256.0f, 0, 0));
+        setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(steps / 256.0f, 0, 0));
 #endif
     }
 }
@@ -296,7 +293,7 @@ void Graphics::SetOrthoWindowSize(float2 size)
     h_params.OrthoSize = size;
 }
 
-void Graphics::RaytraceScreen(VoxelRaytracer3D *rt, uint32_t screen_width, uint32_t screen_height,
+void Graphics::RenderScreen(VoxelRaytracer3D *rt, uint32_t screen_width, uint32_t screen_height,
                               void *d_screen_texture, float3 origin, float3 camera_fwd, float3 camera_up,
                               float3 camera_right)
 {
