@@ -214,13 +214,11 @@ __global__ void screenDispatch(float3 origin, float3 camera_fwd, float3 camera_u
 
             //top left
             if (x < screen_width >> 1 && y < screen_height >> 1) {
-                setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y,
-                make_float3(normal.x, normal.y, normal.z));
+                setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(normal.x, normal.y, normal.z));
             }
             //top right
-            else if(x > screen_width >> 1 && y < screen_height >> 1){
-                setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y,
-                make_float3(hitPos.x, hitPos.y, hitPos.z));
+            else if(x >= screen_width >> 1 && y < screen_height >> 1){
+                setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(hitPos.x, hitPos.y, hitPos.z));
             }
             //bottom left
             else if (x < screen_width >> 1) {
@@ -231,8 +229,8 @@ __global__ void screenDispatch(float3 origin, float3 camera_fwd, float3 camera_u
                 setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(dist * 0.01f, 0, 0));
             }
 
-            setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y,
-            make_float3(fmodf(dist, 1.0f),0,0));
+            //setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y,
+            //make_float3(fmodf(dist, 1.0f),0,0));
 
 #else
             int color_steps = 0;
@@ -261,7 +259,10 @@ __global__ void screenDispatch(float3 origin, float3 camera_fwd, float3 camera_u
         }
 
 #ifdef DEBUG_VIEW
-        setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(steps / 256.0f, 0, 0));
+        //bottom left
+        if (x < screen_width >> 1 && y > screen_height >> 1) {
+            setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(steps / 256.0f, 0, 0));
+        }
 #endif
     }
 }

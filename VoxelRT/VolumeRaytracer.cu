@@ -247,21 +247,18 @@ __device__ void DDARayTraversal(const DDARayParams<float3, 3> &Params, DDARayRes
                     float bmax_z = (Params.per_voxel_bounds[idx].max.z + 1) / Params.per_voxel_bounds_scale + clamped_z;
                     if (grid[idx] == 1 && bmin_x <= bmax_x)
                     {
-                        float temp_x = Params.start.x;
-                        float temp_y = Params.start.y;
-                        float temp_z = Params.start.z;
                         float3 aabb_normal = make_float3(0, 0, 0);
                         float3 aabb_pos = make_float3(0, 0, 0);
-                        if (RayIntersectsAABB(make_float3(temp_x, temp_y, temp_z), Params.direction,
+                        if (RayIntersectsAABB(Params.start, Params.direction,
                                               make_float3(bmin_x, bmin_y, bmin_z), make_float3(bmax_x, bmax_y, bmax_z),
                                               &aabb_pos, &aabb_normal))
                         {
                             returnResults.hit = true;
-                            if (step == 0)
+                            returnResults.HitNormal = aabb_normal;
+                            if (step != 0)
                             {
-                                returnResults.HitNormal = aabb_normal;
+                                returnResults.HitIntersectedPoint = aabb_pos;
                             }
-                            returnResults.HitIntersectedPoint = aabb_pos;
                             exit = true;
                         }
                     }
