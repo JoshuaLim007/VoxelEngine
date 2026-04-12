@@ -121,7 +121,6 @@ namespace GPUDDA {
 		bool isOutOfBounds;
 		T HitCell;
 		T HitIntersectedPoint;
-		T NextInterSectedPoint;
 		T NextCell;
 		T HitNormal;
 		int stepsTaken;

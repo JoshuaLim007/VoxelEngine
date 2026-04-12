@@ -144,8 +144,7 @@ __device__ bool RayIntersectsAABB(const float3 &start, const float3 &direction, 
     }
     if (out_intersect)
     {
-        *out_intersect =
-            make_float3(start.x + t_min * direction.x, start.y + t_min * direction.y, start.z + t_min * direction.z);
+        *out_intersect = make_float3(start.x + t_min * direction.x, start.y + t_min * direction.y, start.z + t_min * direction.z);
     }
 
     if (out_normal)
@@ -198,10 +197,11 @@ __device__ void DDARayTraversal(const DDARayParams<float3, 3> &Params, DDARayRes
     float tMax_y = (dy != 0) ? (((cell_y + (step_y > 0)) - y) / dy) : FLT_INF;
     float tMax_z = (dz != 0) ? (((cell_z + (step_z > 0)) - z) / dz) : FLT_INF;
 
-    Results.HitIntersectedPoint = make_float3(x, y, z);
-    Results.hit = false;
-    Results.isOutOfBounds = false;
-    Results.stepsTaken = 0;
+	DDARayResults<float3> returnResults;
+    returnResults.HitIntersectedPoint = make_float3(x, y, z);
+    returnResults.hit = false;
+    returnResults.isOutOfBounds = false;
+    returnResults.stepsTaken = 0;
 
     auto grid = Params.VoxelBuffer.grid;
     bool exit = false;
@@ -235,32 +235,33 @@ __device__ void DDARayTraversal(const DDARayParams<float3, 3> &Params, DDARayRes
                 int clamped_x = min(max(cell_x, 0), cols - 1);
                 int clamped_y = min(max(cell_y, 0), rows - 1);
                 int clamped_z = min(max(cell_z, 0), depth - 1);
-                Results.HitCell = make_float3(clamped_x, clamped_y, clamped_z);
+                returnResults.HitCell = make_float3(clamped_x, clamped_y, clamped_z);
                 int idx = (clamped_z * rows * cols + clamped_y * cols + clamped_x);
                 if (Params.per_voxel_bounds)
                 {
-                    float bmin_x = Params.per_voxel_bounds[idx].min.x + clamped_x * Params.per_voxel_bounds_scale;
-                    float bmin_y = Params.per_voxel_bounds[idx].min.y + clamped_y * Params.per_voxel_bounds_scale;
-                    float bmin_z = Params.per_voxel_bounds[idx].min.z + clamped_z * Params.per_voxel_bounds_scale;
-                    float bmax_x = Params.per_voxel_bounds[idx].max.x + 1 + clamped_x * Params.per_voxel_bounds_scale;
-                    float bmax_y = Params.per_voxel_bounds[idx].max.y + 1 + clamped_y * Params.per_voxel_bounds_scale;
-                    float bmax_z = Params.per_voxel_bounds[idx].max.z + 1 + clamped_z * Params.per_voxel_bounds_scale;
+                    float bmin_x = (Params.per_voxel_bounds[idx].min.x + 0) / Params.per_voxel_bounds_scale + clamped_x;
+                    float bmin_y = (Params.per_voxel_bounds[idx].min.y + 0) / Params.per_voxel_bounds_scale + clamped_y;
+                    float bmin_z = (Params.per_voxel_bounds[idx].min.z + 0) / Params.per_voxel_bounds_scale + clamped_z;
+                    float bmax_x = (Params.per_voxel_bounds[idx].max.x + 1) / Params.per_voxel_bounds_scale + clamped_x;
+                    float bmax_y = (Params.per_voxel_bounds[idx].max.y + 1) / Params.per_voxel_bounds_scale + clamped_y;
+                    float bmax_z = (Params.per_voxel_bounds[idx].max.z + 1) / Params.per_voxel_bounds_scale + clamped_z;
                     if (grid[idx] == 1 && bmin_x <= bmax_x)
                     {
-                        float temp_x = Params.start.x * Params.per_voxel_bounds_scale;
-                        float temp_y = Params.start.y * Params.per_voxel_bounds_scale;
-                        float temp_z = Params.start.z * Params.per_voxel_bounds_scale;
+                        float temp_x = Params.start.x;
+                        float temp_y = Params.start.y;
+                        float temp_z = Params.start.z;
                         float3 aabb_normal = make_float3(0, 0, 0);
                         float3 aabb_pos = make_float3(0, 0, 0);
                         if (RayIntersectsAABB(make_float3(temp_x, temp_y, temp_z), Params.direction,
                                               make_float3(bmin_x, bmin_y, bmin_z), make_float3(bmax_x, bmax_y, bmax_z),
                                               &aabb_pos, &aabb_normal))
                         {
-                            Results.hit = true;
+                            returnResults.hit = true;
                             if (step == 0)
                             {
-                                Results.HitNormal = aabb_normal;
+                                returnResults.HitNormal = aabb_normal;
                             }
+                            returnResults.HitIntersectedPoint = aabb_pos;
                             exit = true;
                         }
                     }
@@ -269,14 +270,14 @@ __device__ void DDARayTraversal(const DDARayParams<float3, 3> &Params, DDARayRes
                 {
                     if (grid[idx] == 1)
                     {
-                        Results.hit = true;
+                        returnResults.hit = true;
                         exit = true;
                     }
                 }
             }
             else
             {
-                Results.isOutOfBounds = true;
+                returnResults.isOutOfBounds = true;
                 exit = true;
             }
         }
@@ -292,7 +293,7 @@ __device__ void DDARayTraversal(const DDARayParams<float3, 3> &Params, DDARayRes
             cell_x += step_x;
             tMax_x += tDelta_x;
             if (!exit)
-                Results.HitNormal = make_float3(step_x, 0, 0);
+                returnResults.HitNormal = make_float3(step_x, 0, 0);
         }
         else if (tMax_y <= tMax_x && tMax_y < tMax_z)
         {
@@ -302,7 +303,7 @@ __device__ void DDARayTraversal(const DDARayParams<float3, 3> &Params, DDARayRes
             cell_y += step_y;
             tMax_y += tDelta_y;
             if (!exit)
-                Results.HitNormal = make_float3(0, step_y, 0);
+                returnResults.HitNormal = make_float3(0, step_y, 0);
         }
         else
         {
@@ -312,7 +313,7 @@ __device__ void DDARayTraversal(const DDARayParams<float3, 3> &Params, DDARayRes
             cell_z += step_z;
             tMax_z += tDelta_z;
             if (!exit)
-                Results.HitNormal = make_float3(0, 0, step_z);
+                returnResults.HitNormal = make_float3(0, 0, step_z);
         }
         if (!exit)
         {
@@ -329,20 +330,20 @@ __device__ void DDARayTraversal(const DDARayParams<float3, 3> &Params, DDARayRes
                                       intersect_y > max_y || intersect_z < min_z || intersect_z > max_z);
                 if (isOutOfBounds)
                 {
-                    Results.isOutOfBounds = true;
+                    returnResults.isOutOfBounds = true;
                     break;
                 }
             }
-            Results.stepsTaken += 1;
-            Results.HitIntersectedPoint = make_float3(intersect_x, intersect_y, intersect_z);
+            returnResults.stepsTaken += 1;
+            returnResults.HitIntersectedPoint = make_float3(intersect_x, intersect_y, intersect_z);
         }
         else
         {
-            Results.NextCell = make_float3(cell_x, cell_y, cell_z);
-            Results.NextInterSectedPoint = make_float3(intersect_x, intersect_y, intersect_z);
+            returnResults.NextCell = make_float3(cell_x, cell_y, cell_z);
             break;
         }
     }
+    Results = returnResults;
 }
 
 __device__ bool Raytrace(int maxSteps, float3 origin, float3 ray, VoxelBuffer3D chunks, VoxelBuffer3D *chunksData,
