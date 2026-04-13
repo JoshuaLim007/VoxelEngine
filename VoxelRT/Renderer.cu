@@ -100,8 +100,7 @@ __device__ float3 calculateColor(float3 camPos, float3 normal, float3 position, 
 
     float3 shadowNormal;
     int steps;
-    bool hit = Raytrace(MAX_STEPS, shadowPos, shadowRay, chunks[0], chunksData, chunkBoundingBoxes, factor, steps,
-                        shadowNormal, shadowPos);
+    bool hit = false;// Raytrace(MAX_STEPS, shadowPos, shadowRay, chunks[0], chunksData, chunkBoundingBoxes, factor, steps, shadowNormal, shadowPos);
     out_steps += steps;
     float lDot = fmaxf(dot(normal, g_env.LightDirection), 0) * (hit ? 0 : 1);
     float3 diffuse = lDot * g_env.LightColor;

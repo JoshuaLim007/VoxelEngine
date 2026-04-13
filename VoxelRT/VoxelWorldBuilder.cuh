@@ -16,13 +16,12 @@ static VoxelBuffer3D CreateVoxels(uint3 size)
     voxels.dimensions[1] = size.y;
     voxels.dimensions[2] = size.z;
     size_t buffer_size = static_cast<size_t>(size.x) * size.y * size.z;
-    voxels.grid = BitArray(buffer_size);
+    voxels.grid = BitArray(buffer_size, false);
 
     BitArray temp = BitArray(buffer_size, true);
     auto threads = dim3(8, 8, 8);
     auto scaled_size = make_uint3(size.x, size.y, size.z);
-    auto dim = dim3((scaled_size.x / 8 + threads.x - 1) / threads.x, (scaled_size.y + threads.y - 1) / threads.y,
-        (scaled_size.z + threads.z - 1) / threads.z);
+    auto dim = dim3((scaled_size.x + threads.x - 1) / threads.x, (scaled_size.y + threads.y - 1) / threads.y, (scaled_size.z + threads.z - 1) / threads.z);
 
     PopulateVoxels << <dim, threads >> > (temp, scaled_size);
     cudaDeviceSynchronize();

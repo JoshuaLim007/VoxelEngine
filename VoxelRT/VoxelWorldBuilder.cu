@@ -13,65 +13,22 @@ __global__ void PopulateVoxels(BitArray voxels, uint3 size)
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int z = blockIdx.z * blockDim.z + threadIdx.z;
 
-    x *= 8;
-    size_t idx = static_cast<size_t>(z) * size.x * size.y + static_cast<size_t>(y) * size.x + x;
-
     size_t max = static_cast<size_t>(size.x) * size.y * size.z;
-    for (size_t i = 0; i < 8; i++)
+    float scale = 0.01;
+
+    // 1d to 3d index
+    float fx = x * scale;
+    float fy = y * scale;
+    float fz = z * scale;
+    float t = PerlinNoise(fx, fy, fz) * 1000;
+    t = fmaxf(t, 0);
+    auto newIdx = x + y * size.x + z * size.x * size.y;
+    if (y > t)
     {
-        if (idx + i >= max)
-        {
-            return;
-        }
-        float scale = 0.002;
-
-        float3 offsets[] = {make_float3(1.5f, 0, 0),     make_float3(0, 1.5f, 0),  make_float3(0, 0, 1.5f),
-                            make_float3(-1.5f, 0, 1.5f), make_float3(0, -1.5f, 0), make_float3(0, 0, -1.5f)};
-        bool nextToAir = false;
-        for (int j = 0; j < 6; j++)
-        {
-            int x = (idx + i) % size.x;
-            int y = ((idx + i) / size.x) % size.y;
-            int z = (idx + i) / (size.x * size.y);
-            x += offsets[j].x;
-            y += offsets[j].y;
-            z += offsets[j].z;
-            float fx = x * scale;
-            float fy = y * scale;
-            float fz = z * scale;
-            float t = PerlinNoise(fx, fy, fz) * 1000;
-            t = fmaxf(t, 0);
-            bool isAir = y > t;
-            if (isAir)
-            {
-                nextToAir = true;
-                break;
-            }
-        }
-
-        if (nextToAir)
-        {
-            // 1d to 3d index
-            int x = (idx + i) % size.x;
-            int y = ((idx + i) / size.x) % size.y;
-            int z = (idx + i) / (size.x * size.y);
-            float fx = x * scale;
-            float fy = y * scale;
-            float fz = z * scale;
-            float t = PerlinNoise(fx, fy, fz) * 1000;
-            t = fmaxf(t, 0);
-            if (y > t)
-            {
-                voxels[idx + i] = (0);
-            }
-            else
-            {
-                voxels[idx + i] = (1);
-            }
-        }
-        else
-        {
-            voxels[idx + i] = (0);
-        }
+        voxels[newIdx] = (0);
+    }
+    else
+    {
+        voxels[newIdx] = (1);
     }
 }

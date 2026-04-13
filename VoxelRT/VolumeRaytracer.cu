@@ -3,6 +3,8 @@
 #include "helper_math.h"
 #include <chrono>
 #include <cuda_runtime.h>
+#include <atomic>
+#include <cstdint>
 #include <device_atomic_functions.h>
 #include <device_launch_parameters.h>
 #include <iostream>
@@ -14,41 +16,46 @@ __device__ __host__ BitRef::operator bool() const
 {
     return (*byte >> index) & 1;
 }
-
-__host__ __device__ BitRef &BitRef::operator=(bool value)
+__host__ __device__ BitRef& BitRef::operator=(bool value)
 {
+#if defined(__CUDA_ARCH__)
+    uint32_t mask = 1u << (index & 31);
     if (value)
-        *byte |= (1 << index); // Set bit
+        atomicOr(byte, mask);
     else
-        *byte &= ~(1 << index); // Clear bit
+        atomicAnd(byte, ~mask);
+#else
+    uint32_t mask = 1u << (index & 31);
+    std::atomic<uint32_t>* ref = reinterpret_cast<std::atomic<uint32_t>*>(byte);
+    if (value)
+        ref->fetch_or(mask, std::memory_order_relaxed);
+    else
+        ref->fetch_and(~mask, std::memory_order_relaxed);
+#endif
     return *this;
 }
 __device__ __host__ BitArray::BitArray() : size(0), data(nullptr)
 {
 }
-__device__ __host__ BitArray::BitArray(size_t num_bits) : size(num_bits)
-{
-    data = new uint8_t[(size + 7) / 8]();
-}
 __device__ __host__ BitArray::BitArray(const BitArray &other, bool isGPU) : size(other.size)
 {
     if (isGPU)
     {
-        cudaMalloc((void **)&data, (size + 7) / 8);
-        cudaMemcpy(data, other.data, (size + 7) / 8, cudaMemcpyHostToDevice);
+        cudaMalloc((void **)&data, (size + 31) / 32 * sizeof(uint32_t));
+        cudaMemcpy(data, other.data, (size + 31) / 32 * sizeof(uint32_t), cudaMemcpyHostToDevice);
         return;
     }
-    data = new uint8_t[(size + 7) / 8];
-    std::copy(other.data, other.data + (size + 7) / 8, data);
+    data = new uint32_t[(size + 31) / 32];
+    std::copy(other.data, other.data + (size + 31) / 32, data);
 }
 __device__ __host__ BitArray::BitArray(size_t num_bits, bool isGPU) : size(num_bits)
 {
     if (isGPU)
     {
-        cudaMalloc((void **)&data, (size + 7) / 8);
+        cudaMalloc((void **)&data, (size + 31) / 32 * sizeof(uint32_t));
         return;
     }
-    data = new uint8_t[(size + 7) / 8];
+    data = new uint32_t[(size + 31) / 32];
 }
 
 __device__ __host__ bool BitArray::operator[](size_t index) const
@@ -57,14 +64,14 @@ __device__ __host__ bool BitArray::operator[](size_t index) const
     {
         return false; // Out of bounds
     }
-    return (data[index / 8] >> (index % 8)) & 1;
+    return (data[index / 32] >> (index % 32)) & 1;
 }
 
 __device__ __host__ BitRef BitArray::operator[](size_t index)
 {
-    return BitRef{&data[index / 8], static_cast<size_t>(index % 8)};
+    return BitRef{&data[index / 32], static_cast<size_t>(index % 32)};
 }
-__device__ __host__ uint8_t *BitArray::Raw()
+__device__ __host__ uint32_t *BitArray::Raw()
 {
     return data;
 }
@@ -74,7 +81,7 @@ __device__ __host__ size_t BitArray::BitSize() const
 }
 __device__ __host__ size_t BitArray::ByteSize() const
 {
-    return (size + 7) / 8;
+    return ((size + 31) / 32) * sizeof(uint32_t);
 }
 std::ostream &operator<<(std::ostream &os, const BitArray &bits)
 {
@@ -565,7 +572,7 @@ void VoxelRaytracer3D::UploadVoxelBufferDataBounds(Bounds3Df *bounds, size_t cou
 
 RayTraceResults<float3> VoxelRaytracer3D::Raytrace(std::vector<float3> origin, std::vector<float3> ray)
 {
-    auto result = resultsCPU;
+    auto& result = resultsCPU;
     int count = origin.size();
 
     cudaMemcpy(d_origins, origin.data(), sizeof(float3) * count, cudaMemcpyHostToDevice);

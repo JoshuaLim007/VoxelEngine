@@ -143,8 +143,8 @@ int main()
             cam_pos += cam_up * cam_speed;
         }
 
-        std::cout << "Cam pos: " << cam_pos.x << ", " << cam_pos.y << ", " << cam_pos.z << std::endl;
-        std::cout << "Cam eular: " << cam_eular.x << ", " << cam_eular.y << ", " << cam_eular.z << std::endl;
+        //std::cout << "Cam pos: " << cam_pos.x << ", " << cam_pos.y << ", " << cam_pos.z << std::endl;
+        //std::cout << "Cam eular: " << cam_eular.x << ", " << cam_eular.y << ", " << cam_eular.z << std::endl;
 
         static int last_x = 0, last_y = 0;
         int x, y;
@@ -154,13 +154,13 @@ int main()
             // mouse movement
             int dx = x - last_x;
             int dy = y - last_y;
-            cam_eular.x += dy * 0.001f;
-            cam_eular.y += dx * 0.001f;
+            cam_eular.x += dy * 0.004f;
+            cam_eular.y += dx * 0.004f;
         }
         last_x = x;
         last_y = y;
 
-        std::cout << "Cam Forward: " << cam_forward.x << ", " << cam_forward.y << ", " << cam_forward.z << std::endl;
+        //std::cout << "Cam Forward: " << cam_forward.x << ", " << cam_forward.y << ", " << cam_forward.z << std::endl;
 
         GetDirections(cam_eular, &cam_forward, &cam_up, &cam_right);
         RenderScreen(raytracer, width, height, d_pixels, cam_pos, cam_forward, cam_up, cam_right);
@@ -176,15 +176,15 @@ int main()
         auto t1 = std::chrono::high_resolution_clock::now();
         auto td = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() / 1000.0;
 
-        avgFrameTime = avgFrameTime * (1 - (1 / 1000.0)) + td * (1 / 1000.0);
+        avgFrameTime = avgFrameTime * (1 - (1 / 100.0)) + td * (1 / 100.0);
 
-        printf("Frame time: %dms\n", td);
-        printf("Avg Frame time: %dms\n", avgFrameTime);
+        //printf("Frame time: %dms\n", td);
+        //printf("Avg Frame time: %dms\n", avgFrameTime);
 
         auto fps = 1000.0f / td;
         auto avgfps = 1000.0f / avgFrameTime;
-        std::cout << "FPS: " << fps << std::endl;
-        std::cout << "Avg FPS: " << avgfps << std::endl;
+        //std::cout << "FPS: " << fps << std::endl;
+        //std::cout << "Avg FPS: " << avgfps << std::endl;
 
         std::stringstream stream;
         stream << "Avg FPS: " << avgfps << "\n";

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #ifndef VOLUME_RAYTRACER_CUH
 #define VOLUME_RAYTRACER_CUH
 
@@ -52,24 +52,22 @@ namespace GPUDDA {
 	};
 
 	struct BitRef {
-		uint8_t* byte = nullptr;
+		uint32_t* byte = nullptr;
 		size_t index = 0;
 		__device__ __host__ operator bool() const;
 		__device__ __host__ BitRef& operator=(bool value);
 	};
-
 	struct BitArray {
 	private:
 		size_t size = 0;
-		uint8_t* data = nullptr;
+		uint32_t* data = nullptr;
 	public:
-		__device__ __host__ BitArray();
-		__device__ __host__ BitArray(size_t num_bits);
-		__device__ __host__ BitArray(const BitArray& other, bool isGPU);
-		__device__ __host__ BitArray(size_t num_bits, bool isGPU);
+		__host__ BitArray();
+		__host__ BitArray(const BitArray& other, bool isGPU);
+		__host__ BitArray(size_t num_bits, bool isGPU);
 		__device__ __host__ bool operator[](size_t index) const;
 		__device__ __host__ BitRef operator[](size_t index);
-		__device__ __host__ uint8_t* Raw();
+		__device__ __host__ uint32_t* Raw();
 		__device__ __host__ size_t BitSize() const;
 		__device__ __host__ size_t ByteSize() const;
 	};
@@ -268,7 +266,7 @@ namespace GPUDDA {
 
 				bool any = false;
 				auto temp = &low_res_grid_data[z * low_res_rows * low_res_cols + y * low_res_cols + x];
-				temp->grid = BitArray(factor * factor * factor);
+				temp->grid = BitArray(factor * factor * factor, false);
 				temp->dimensions[2] = factor;
 				temp->dimensions[1] = factor;
 				temp->dimensions[0] = factor;
@@ -424,7 +422,7 @@ namespace GPUDDA {
 			thread.join();
 		}
 
-		BitArray low_res_grid = BitArray(low_res_rows * low_res_cols * low_res_slices);
+		BitArray low_res_grid = BitArray(low_res_rows * low_res_cols * low_res_slices, false);
 		for (size_t i = 0; i < max_count; i++) {
 			low_res_grid[i] = temp[i];
 		}
