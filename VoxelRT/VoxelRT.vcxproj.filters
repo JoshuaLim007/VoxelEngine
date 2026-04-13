@@ -6,10 +6,10 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <CudaCompile Include="DDA.cu">
+    <CudaCompile Include="VolumeRaytracer.cu">
       <Filter>Source Files</Filter>
     </CudaCompile>
-    <CudaCompile Include="Raytracer.cu">
+    <CudaCompile Include="Renderer.cu">
       <Filter>Source Files</Filter>
     </CudaCompile>
     <CudaCompile Include="VoxelWorldBuilder.cu">
@@ -20,13 +20,13 @@
     </CudaCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="DDA.cuh">
+    <ClInclude Include="VolumeRaytracer.cuh">
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="helper_math.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="Raytracer.cuh">
+    <ClInclude Include="Renderer.cuh">
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="VoxelWorldBuilder.cuh">

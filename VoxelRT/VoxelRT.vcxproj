@@ -12,15 +12,15 @@
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="cuda_noise.cu" />
-    <CudaCompile Include="DDA.cu" />
-    <CudaCompile Include="Raytracer.cu" />
+    <CudaCompile Include="VolumeRaytracer.cu" />
+    <CudaCompile Include="Renderer.cu" />
     <CudaCompile Include="VoxelWorldBuilder.cu" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="cuda_noise.cuh" />
-    <ClInclude Include="DDA.cuh" />
+    <ClInclude Include="VolumeRaytracer.cuh" />
     <ClInclude Include="helper_math.h" />
-    <ClInclude Include="Raytracer.cuh" />
+    <ClInclude Include="Renderer.cuh" />
     <ClInclude Include="VoxelWorldBuilder.cuh" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
