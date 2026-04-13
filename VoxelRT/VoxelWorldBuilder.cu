@@ -23,6 +23,7 @@ __global__ void PopulateVoxels(BitArray voxels, uint3 size)
     float t = PerlinNoise(fx, fy, fz) * 1000;
     t = fmaxf(t, 0);
     auto newIdx = x + y * size.x + z * size.x * size.y;
+    newIdx = GetSampleIndex(x, y, z, size.x, size.y);
     if (y > t)
     {
         voxels[newIdx] = (0);

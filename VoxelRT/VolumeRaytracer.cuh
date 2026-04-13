@@ -13,13 +13,163 @@
 #include <tuple>
 #include <thread>
 #include <mutex>
-#define MULTI_THREADING 1
+
+//#define SAMPLE_MODE_TILED_LINEAR
+#define SAMPLE_MODE_MORTON
 
 constexpr auto FLT_EPS_DDA = 1e-6;
 constexpr auto FLT_INF = std::numeric_limits<float>::infinity();
 constexpr auto FLT_EPS = std::numeric_limits<float>::epsilon();
 
 namespace GPUDDA {
+	__device__ __host__ inline uint32_t Part1By2(uint32_t x)
+	{
+		x &= 0x7;                 // 3 bits
+		x = (x | (x << 8)) & 0x00000F00F;
+		x = (x | (x << 4)) & 0x000C30C3;
+		x = (x | (x << 2)) & 0x00249249;
+		return x;
+	}
+
+	__device__ __host__ inline uint32_t Morton3D_8(uint32_t x, uint32_t y, uint32_t z)
+	{
+		return (Part1By2(x) << 0) |
+			(Part1By2(y) << 1) |
+			(Part1By2(z) << 2);
+	}
+
+	__device__ __host__ inline uint32_t TiledMortonIndex3D(
+		uint32_t x, uint32_t y, uint32_t z,
+		uint32_t width, uint32_t height)
+	{
+		// --- Tile coordinates ---
+		uint32_t tileX = x >> 3;  // /8
+		uint32_t tileY = y >> 3;
+		uint32_t tileZ = z >> 3;
+
+		// --- Local coordinates inside tile ---
+		uint32_t localX = x & 7;  // %8
+		uint32_t localY = y & 7;
+		uint32_t localZ = z & 7;
+
+		// --- Morton index inside tile (0..511) ---
+		uint32_t morton = Morton3D_8(localX, localY, localZ);
+
+		// --- Number of tiles in each dimension ---
+		uint32_t tilesX = width >> 3;
+		uint32_t tilesY = height >> 3;
+
+		// --- Linear tile index ---
+		uint32_t tileIndex = tileX +
+			tileY * tilesX +
+			tileZ * tilesX * tilesY;
+
+		// --- Final index ---
+		return tileIndex * 512 + morton; // 512 = 8^3
+	}
+	__device__ __host__ inline void TiledMortonIndex3D_Inverse(
+		uint32_t index,
+		uint32_t width, uint32_t height,
+		uint32_t& x, uint32_t& y, uint32_t& z)
+	{
+		// --- Extract tile + morton ---
+		uint32_t tileIndex = index >> 9;  // /512
+		uint32_t morton = index & 511; // %512
+
+		// --- Tile grid size ---
+		uint32_t tilesX = width >> 3;
+		uint32_t tilesY = height >> 3;
+
+		// --- Recover tile coords ---
+		uint32_t tileX = tileIndex % tilesX;
+		uint32_t tileY = (tileIndex / tilesX) % tilesY;
+		uint32_t tileZ = tileIndex / (tilesX * tilesY);
+
+		// --- Decode morton ---
+		auto Compact1By2 = [](uint32_t x)
+			{
+				x &= 0x00249249;
+				x = (x ^ (x >> 2)) & 0x000C30C3;
+				x = (x ^ (x >> 4)) & 0x00000F00F;
+				x = (x ^ (x >> 8)) & 0x0000000FF;
+				return x;
+			};
+
+		uint32_t localX = Compact1By2(morton >> 0);
+		uint32_t localY = Compact1By2(morton >> 1);
+		uint32_t localZ = Compact1By2(morton >> 2);
+
+		// --- Reconstruct global coords ---
+		x = (tileX << 3) | localX;
+		y = (tileY << 3) | localY;
+		z = (tileZ << 3) | localZ;
+	}
+	__device__ __host__ inline uint32_t GetSampleIndex(
+		uint32_t x, uint32_t y, uint32_t z,
+		uint32_t width, uint32_t height)
+	{
+#ifdef SAMPLE_MODE_TILED_LINEAR
+		constexpr int tileSize = 8;
+
+		int tW = width / tileSize;
+		int tH = height / tileSize;
+
+		int xC = x / tileSize;
+		int yC = y / tileSize;
+		int zC = z / tileSize;
+
+		int xCx = x % tileSize;
+		int yCy = y % tileSize;
+		int zCz = z % tileSize;
+
+		int chunkIndex = xC + yC * tW + zC * tW * tH;
+		constexpr int chunkSize = tileSize * tileSize * tileSize;
+
+		int fineIndex = xCx + yCy * tileSize + zCz * tileSize * tileSize;
+		int index = chunkIndex * chunkSize + fineIndex;
+
+		return index;
+#elif defined(SAMPLE_MODE_MORTON)
+		return TiledMortonIndex3D(x, y, z, width, height);
+#else
+		return x + y * width + z * width * height;
+#endif
+	}
+	__device__ __host__ inline void GetPositionFromSampleIndex(
+		uint32_t index,
+		uint32_t width, uint32_t height,
+		uint32_t& x, uint32_t& y, uint32_t& z)
+	{
+#ifdef SAMPLE_MODE_TILED_LINEAR
+		constexpr int tileSize = 8;
+		constexpr int chunkSize = tileSize * tileSize * tileSize; // 512
+
+		uint32_t tW = width / tileSize;
+		uint32_t tH = height / tileSize;
+
+		uint32_t chunkIndex = index / chunkSize;
+		uint32_t fineIndex = index % chunkSize;
+
+		uint32_t xC = chunkIndex % tW;
+		uint32_t yC = (chunkIndex / tW) % tH;
+		uint32_t zC = chunkIndex / (tW * tH);
+
+		uint32_t xCx = fineIndex % tileSize;
+		uint32_t yCy = (fineIndex / tileSize) % tileSize;
+		uint32_t zCz = fineIndex / (tileSize * tileSize);
+
+		x = xC * tileSize + xCx;
+		y = yC * tileSize + yCy;
+		z = zC * tileSize + zCz;
+#elif defined(SAMPLE_MODE_MORTON)
+		return TiledMortonIndex3D_Inverse(index, width, height, x, y, z);
+#else
+		x = index % width;
+		y = (index / width) % height;
+		z = index / (width * height);
+#endif
+	}
+
 	template<class T>
 	struct Bounds {
 		T min; // minimum bounds
@@ -257,15 +407,18 @@ namespace GPUDDA {
 			size_t index = params.threadId * params.countPerThread;
 			for (size_t i = 0; i < params.countPerThread; i++) {
 				size_t tI = index + i;
-				size_t x = tI % params.cols;
-				size_t y = (tI / params.cols) % params.rows;
-				size_t z = tI / (params.cols * params.rows);
+				uint32_t x{};// = tI % params.cols;
+				uint32_t y{};// = (tI / params.cols) % params.rows;
+				uint32_t z{};// = tI / (params.cols * params.rows);
 				if (tI >= params.maxCount) {
 					break;
 				}
 
+				GetPositionFromSampleIndex(tI, params.cols, params.rows, x, y, z);
+				auto idx = GetSampleIndex(x, y, z, low_res_cols, low_res_rows);
+
 				bool any = false;
-				auto temp = &low_res_grid_data[z * low_res_rows * low_res_cols + y * low_res_cols + x];
+				auto temp = &low_res_grid_data[idx];
 				temp->grid = BitArray(factor * factor * factor, false);
 				temp->dimensions[2] = factor;
 				temp->dimensions[1] = factor;
@@ -282,17 +435,10 @@ namespace GPUDDA {
 					for (int dy = 0; dy < factor; ++dy) {
 						for (int dx = 0; dx < factor; ++dx) {
 							// Copy the data from the high-res buffer to the low-res buffer
-							temp->grid[static_cast<size_t>(dz) * factor * factor + static_cast<size_t>(dy) * factor + dx] =
-								high_res_buffer->grid[(static_cast<size_t>(z) * factor + dz) * high_res_buffer->dimensions[1] *
-								high_res_buffer->dimensions[0] + (static_cast<size_t>(y) * factor + dy) *
-								high_res_buffer->dimensions[0] + (static_cast<size_t>(x) * factor + dx)];
-
-							// Check if the voxel is occupied
-							int px = x * factor + dx;
-							int py = y * factor + dy;
-							int pz = z * factor + dz;
-							size_t idx = static_cast<size_t>(pz) * high_res_buffer->dimensions[1] * high_res_buffer->dimensions[0] + static_cast<size_t>(py) * high_res_buffer->dimensions[0] + px;
-							if (high_res_buffer->grid[idx] != 0) {
+							auto lowIdx = GetSampleIndex(dx, dy, dz, factor, factor);
+							auto highIdx = GetSampleIndex(dx + factor * x, dy + factor * y, dz + factor * z, high_res_buffer->dimensions[0], high_res_buffer->dimensions[1]);
+							temp->grid[lowIdx] = high_res_buffer->grid[highIdx];
+							if (high_res_buffer->grid[highIdx] != 0) {
 								any = true;
 								min_x = std::min(min_x, dx);
 								min_y = std::min(min_y, dy);
@@ -317,7 +463,6 @@ namespace GPUDDA {
 					temp->dimensions[2] = 0;
 					delete[] temp->grid.Raw();
 				}
-				auto idx = z * low_res_rows * low_res_cols + y * low_res_cols + x;
 				low_res_per_chunk_bounds[idx].max = make_float3(max_x, max_y, max_z);
 				low_res_per_chunk_bounds[idx].min = make_float3(min_x, min_y, min_z);
 				params.low_res_grid_contains_voxels[idx] = any ? 1 : 0;
@@ -330,72 +475,6 @@ namespace GPUDDA {
 		VoxelBuffer3D* low_res_grid_data = new VoxelBuffer3D[low_res_rows * low_res_cols * low_res_slices] {};
 		Bounds3Df* low_res_per_chunk_bounds = new Bounds3Df[low_res_rows * low_res_cols * low_res_slices] {};
 
-#if MULTI_THREADING == 0
-		BitArray low_res_grid = BitArray(low_res_rows * low_res_cols * low_res_slices);
-		for (size_t z = 0; z < low_res_slices; z++) {
-			for (size_t y = 0; y < low_res_rows; y++) {
-				for (size_t x = 0; x < low_res_cols; x++) {
-					bool any = false;
-					auto temp = &low_res_grid_data[z * low_res_rows * low_res_cols + y * low_res_cols + x];
-					temp->grid = BitArray(factor * factor * factor);
-					temp->dimensions[2] = factor;
-					temp->dimensions[1] = factor;
-					temp->dimensions[0] = factor;
-
-					int min_x = std::numeric_limits<int>::max();
-					int min_y = std::numeric_limits<int>::max();
-					int min_z = std::numeric_limits<int>::max();
-					int max_x = std::numeric_limits<int>::min();
-					int max_y = std::numeric_limits<int>::min();
-					int max_z = std::numeric_limits<int>::min();
-
-					for (int dz = 0; dz < factor; ++dz) {
-						for (int dy = 0; dy < factor; ++dy) {
-							for (int dx = 0; dx < factor; ++dx) {
-								// Copy the data from the high-res buffer to the low-res buffer
-								temp->grid[static_cast<size_t>(dz) * factor * factor + static_cast<size_t>(dy) * factor + dx] =
-									originalData.grid[(static_cast<size_t>(z) * factor + dz) * originalData.dimensions[1] *
-									originalData.dimensions[0] + (static_cast<size_t>(y) * factor + dy) *
-									originalData.dimensions[0] + (static_cast<size_t>(x) * factor + dx)];
-
-								// Check if the voxel is occupied
-								int px = x * factor + dx;
-								int py = y * factor + dy;
-								int pz = z * factor + dz;
-								size_t idx = static_cast<size_t>(pz) * originalData.dimensions[1] * originalData.dimensions[0] + static_cast<size_t>(py) * originalData.dimensions[0] + px;
-								if (originalData.grid[idx] != 0) {
-									any = true;
-									min_x = std::min(min_x, dx);
-									min_y = std::min(min_y, dy);
-									min_z = std::min(min_z, dz);
-									max_x = std::max(max_x, dx);
-									max_y = std::max(max_y, dy);
-									max_z = std::max(max_z, dz);
-								}
-							}
-						}
-					}
-
-					if (any == false) {
-						min_x = 0;
-						min_y = 0;
-						min_z = 0;
-						max_x = -1;
-						max_y = -1;
-						max_z = -1;
-						temp->dimensions[0] = 0;
-						temp->dimensions[1] = 0;
-						temp->dimensions[2] = 0;
-						delete[] temp->grid.raw();
-					}
-					auto idx = z * low_res_rows * low_res_cols + y * low_res_cols + x;
-					low_res_per_chunk_bounds[idx].max = make_float3(max_x, max_y, max_z);
-					low_res_per_chunk_bounds[idx].min = make_float3(min_x, min_y, min_z);
-					low_res_grid[idx] = any ? 1 : 0;
-				}
-			}
-		}
-#elif MULTI_THREADING == 1
 		size_t max_count = low_res_cols * low_res_rows * low_res_slices;
 		size_t threads_count = std::thread::hardware_concurrency();
 		size_t count_per_thread = (max_count + threads_count - 1) / threads_count;
@@ -427,7 +506,6 @@ namespace GPUDDA {
 			low_res_grid[i] = temp[i];
 		}
 		delete[] temp;
-#endif
 
 		VoxelBuffer3D low_res_buffer;
 		low_res_buffer.grid = low_res_grid;

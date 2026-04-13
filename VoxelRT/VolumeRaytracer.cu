@@ -244,6 +244,7 @@ __device__ void DDARayTraversal(const DDARayParams<float3, 3> &Params, DDARayRes
                 int clamped_z = min(max(cell_z, 0), depth - 1);
                 returnResults.HitCell = make_float3(clamped_x, clamped_y, clamped_z);
                 int idx = (clamped_z * rows * cols + clamped_y * cols + clamped_x);
+                idx = GetSampleIndex(clamped_x, clamped_y, clamped_z, cols, rows);
                 if (Params.per_voxel_bounds)
                 {
                     float bmin_x = (Params.per_voxel_bounds[idx].min.x + 0) / Params.per_voxel_bounds_scale + clamped_x;
@@ -415,7 +416,7 @@ __device__ bool Raytrace(int maxSteps, float3 origin, float3 ray, VoxelBuffer3D 
             start_high_res.y -= results.HitCell.y * factor;
             start_high_res.z -= results.HitCell.z * factor;
 
-            int index = results.HitCell.z * chunks.dimensions[1] * chunks.dimensions[0] + results.HitCell.y * chunks.dimensions[0] + results.HitCell.x;
+            int index = GetSampleIndex(results.HitCell.x, results.HitCell.y, results.HitCell.z, chunks.dimensions[0], chunks.dimensions[1]);
             VoxelBuffer3D chunkData = chunksData[index];
             DDARayParams<float3, 3> params_hr = DDARayParams<float3, 3>::Default(chunkData, start_high_res, direction);
             params_hr.bounds = &chunkBounds;
