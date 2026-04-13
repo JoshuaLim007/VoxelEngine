@@ -14,8 +14,8 @@
 #include <thread>
 #include <mutex>
 
-//#define SAMPLE_MODE_TILED_LINEAR
-#define SAMPLE_MODE_MORTON
+#define SAMPLE_MODE_TILED_LINEAR
+//#define SAMPLE_MODE_MORTON
 
 constexpr auto FLT_EPS_DDA = 1e-6;
 constexpr auto FLT_INF = std::numeric_limits<float>::infinity();

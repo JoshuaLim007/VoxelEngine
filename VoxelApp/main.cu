@@ -20,7 +20,7 @@ int main()
     // TODO: goal, 128k x 512 x 128k
     int factor = 32;
     auto t0 = std::chrono::high_resolution_clock::now();
-    auto buffer = CreateVoxels(make_uint3(512, 512, 512));
+    auto buffer = CreateVoxels(make_uint3(1024, 1024, 1024));
     auto t1 = std::chrono::high_resolution_clock::now();
     auto td = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
     std::cout << "Voxel generation time: " << td << "ms" << std::endl;

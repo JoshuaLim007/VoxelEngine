@@ -14,7 +14,7 @@ __global__ void PopulateVoxels(BitArray voxels, uint3 size)
     int z = blockIdx.z * blockDim.z + threadIdx.z;
 
     size_t max = static_cast<size_t>(size.x) * size.y * size.z;
-    float scale = 0.01;
+    float scale = 0.005;
 
     // 1d to 3d index
     float fx = x * scale;
