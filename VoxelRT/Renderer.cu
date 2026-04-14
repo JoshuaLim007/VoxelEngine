@@ -6,195 +6,192 @@ constexpr bool ENABLE_CHECKERBOARD_RENDER = true;
 
 struct RenderParams
 {
-    uint2 Resolution;
-    uint32_t FrameNumber;
-    float Fov;
-    float2 OrthoSize;
-    __device__ __host__ RenderParams(uint2 r, uint32_t n, float fov, float2 size)
-    {
-        Resolution = r;
-        FrameNumber = n;
-        Fov = fov;
-        OrthoSize = size;
-    }
-    __device__ __host__ RenderParams()
-    {
-    }
+	uint2 Resolution;
+	uint32_t FrameNumber;
+	float Fov;
+	float2 OrthoSize;
+	__device__ __host__ RenderParams(uint2 r, uint32_t n, float fov, float2 size)
+	{
+		Resolution = r;
+		FrameNumber = n;
+		Fov = fov;
+		OrthoSize = size;
+	}
+	__device__ __host__ RenderParams()
+	{
+	}
 };
 __device__ RenderParams dFrameInfo;
 RenderParams hFrameInfo = RenderParams(make_uint2(0, 0), 0, 90, make_float2(10, 10));
 
-__host__ __device__ void Graphics::GetDirections(float3 eularAngles, float3 *forwad, float3 *up, float3 *right)
+__host__ __device__ void Graphics::GetDirections(float3 eularAngles, float3* forwad, float3* up, float3* right)
 {
-    float3 fwd = make_float3(0, 0, 0);
-    float3 upVec = make_float3(0, 0, 0);
-    float3 rgt = make_float3(0, 0, 0);
-    fwd.x = cos(eularAngles.x) * sin(eularAngles.y);
-    fwd.y = -sin(eularAngles.x);
-    fwd.z = cos(eularAngles.x) * cos(eularAngles.y);
-    rgt.x = cos(eularAngles.y);
-    rgt.y = 0;
-    rgt.z = -sin(eularAngles.y);
-    upVec = cross(fwd, rgt);
-    *forwad = fwd * -1;
-    *up = upVec * -1;
-    *right = rgt;
+	float3 fwd = make_float3(0, 0, 0);
+	float3 upVec = make_float3(0, 0, 0);
+	float3 rgt = make_float3(0, 0, 0);
+	fwd.x = cos(eularAngles.x) * sin(eularAngles.y);
+	fwd.y = -sin(eularAngles.x);
+	fwd.z = cos(eularAngles.x) * cos(eularAngles.y);
+	rgt.x = cos(eularAngles.y);
+	rgt.y = 0;
+	rgt.z = -sin(eularAngles.y);
+	upVec = cross(fwd, rgt);
+	*forwad = fwd * -1;
+	*up = upVec * -1;
+	*right = rgt;
 }
 
 __device__ float3 getRayDirection(float3 fwd, float3 up, float3 right, uint2 screen_dim, float3 uv, float FOV)
 {
-    float aspectRatio = (float)screen_dim.x / (float)screen_dim.y;
-    uv.x = uv.x * 2 - 1;
-    uv.y = uv.y * 2 - 1;
-    uv.z = 1;
-    float fov = FOV * 3.1415 / 180.0;
-    float scale_x = tanf(fov / 2.0f) * aspectRatio;
-    float scale_y = tanf(fov / 2.0f);
-    float3 ray_dir{};
-    ray_dir.x = fwd.x + uv.x * scale_x * right.x + uv.y * scale_y * up.x;
-    ray_dir.y = fwd.y + uv.x * scale_x * right.y + uv.y * scale_y * up.y;
-    ray_dir.z = fwd.z + uv.x * scale_x * right.z + uv.y * scale_y * up.z;
-    ray_dir = normalize(ray_dir);
-    return ray_dir;
+	float aspectRatio = (float)screen_dim.x / (float)screen_dim.y;
+	uv.x = uv.x * 2 - 1;
+	uv.y = uv.y * 2 - 1;
+	uv.z = 1;
+	float fov = FOV * 3.1415 / 180.0;
+	float scale_x = tanf(fov / 2.0f) * aspectRatio;
+	float scale_y = tanf(fov / 2.0f);
+	float3 ray_dir{};
+	ray_dir.x = fwd.x + uv.x * scale_x * right.x + uv.y * scale_y * up.x;
+	ray_dir.y = fwd.y + uv.x * scale_x * right.y + uv.y * scale_y * up.y;
+	ray_dir.z = fwd.z + uv.x * scale_x * right.z + uv.y * scale_y * up.z;
+	ray_dir = normalize(ray_dir);
+	return ray_dir;
 }
 
 __device__ void getRayDirectionOrtho(float3 fwd, float3 up, float3 right, float2 uv, float2 screen_size, float3 origin,
-                                     float3 &out_rayDir, float3 &out_rayOrigin)
+	float3& out_rayDir, float3& out_rayOrigin)
 {
 
-    float ratio = static_cast<float>(dFrameInfo.Resolution.x) / dFrameInfo.Resolution.y;
-    out_rayDir = fwd;
-    out_rayOrigin = origin;
-    out_rayOrigin += right * (uv.x * 2 - 1) * screen_size.x * ratio;
-    out_rayOrigin += up * (uv.y * 2 - 1) * screen_size.y;
+	float ratio = static_cast<float>(dFrameInfo.Resolution.x) / dFrameInfo.Resolution.y;
+	out_rayDir = fwd;
+	out_rayOrigin = origin;
+	out_rayOrigin += right * (uv.x * 2 - 1) * screen_size.x * ratio;
+	out_rayOrigin += up * (uv.y * 2 - 1) * screen_size.y;
 }
 
-__device__ void setPixelColor(void *screen_texture, uint32_t screen_width, uint32_t screen_height, int x, int y,
-                              float3 color)
+__device__ void setPixelColor(void* screen_texture, uint32_t screen_width, uint32_t screen_height, int x, int y,
+	float3 color)
 {
-    GPUDDA::Graphics::BGRA8888 *pixels = (GPUDDA::Graphics::BGRA8888*)screen_texture;
-    if (x >= screen_width || y >= screen_height) return;
+	GPUDDA::Graphics::BGRA8888* pixels = (GPUDDA::Graphics::BGRA8888*)screen_texture;
+	if (x >= screen_width || y >= screen_height) return;
 
-    GPUDDA::Graphics::BGRA8888 *pixel = &pixels[y * screen_width + x];
-    color.x = fminf(fmaxf(color.x, 0), 1);
-    color.y = fminf(fmaxf(color.y, 0), 1);
-    color.z = fminf(fmaxf(color.z, 0), 1);
+	GPUDDA::Graphics::BGRA8888* pixel = &pixels[y * screen_width + x];
+	color.x = fminf(fmaxf(color.x, 0), 1);
+	color.y = fminf(fmaxf(color.y, 0), 1);
+	color.z = fminf(fmaxf(color.z, 0), 1);
 
-    pixel->r = color.x * 255;
-    pixel->g = color.y * 255;
-    pixel->b = color.z * 255;
-    pixel->a = 255;
+	pixel->r = color.x * 255;
+	pixel->g = color.y * 255;
+	pixel->b = color.z * 255;
+	pixel->a = 255;
 }
 
 __device__ Graphics::Environment g_env;
-__device__ float3 calculateColor(float3 camPos, float3 normal, float3 position, VoxelBuffer3D *chunks,
-                                 VoxelBuffer3D *chunksData, Bounds3Df *chunkBoundingBoxes, int factor,
-                                 int &out_steps)
+__device__ float3 calculateColor(float3 camPos, float3 normal, float3 position, VoxelBuffer3D* chunks,
+	VoxelBuffer3D* chunksData, Bounds3Df* chunkBoundingBoxes, int factor,
+	int& out_steps)
 {
-    out_steps = 0;
+	out_steps = 0;
 
-    // shadow
-    float3 shadowRay = normalize(g_env.LightDirection);
-    float3 shadowPos = position + shadowRay * 0.01f;
+	// shadow
+	float3 shadowRay = normalize(g_env.LightDirection);
+	float3 shadowPos = position + shadowRay * 0.01f;
 
-    float3 shadowNormal;
-    int steps;
-    bool hit = false;// Raytrace(MAX_STEPS, shadowPos, shadowRay, chunks[0], chunksData, chunkBoundingBoxes, factor, steps, shadowNormal, shadowPos);
-    out_steps += steps;
-    float lDot = fmaxf(dot(normal, g_env.LightDirection), 0) * (hit ? 0 : 1);
-    float3 diffuse = lDot * g_env.LightColor;
-    float3 ambient = g_env.AmbientColor * lerp(0.25, 1.0, dot(normal, make_float3(0, 1, 0)) * 0.5 + 0.5);
-    float3 color = diffuse + ambient;
+	float3 shadowNormal;
+	int steps;
+	bool hit = false;// Raytrace(MAX_STEPS, shadowPos, shadowRay, chunks[0], chunksData, chunkBoundingBoxes, factor, steps, shadowNormal, shadowPos);
+	out_steps += steps;
+	float lDot = fmaxf(dot(normal, g_env.LightDirection), 0) * (hit ? 0 : 1);
+	float3 diffuse = lDot * g_env.LightColor;
+	float3 ambient = g_env.AmbientColor * lerp(0.25, 1.0, dot(normal, make_float3(0, 1, 0)) * 0.5 + 0.5);
+	float3 color = diffuse + ambient;
 
-    // specular
-    if (!hit)
-    {
-        float3 viewDir = normalize(position - camPos);
-        float3 reflectDir = reflect(g_env.LightDirection, normal);
-        float spec = powf(fmaxf(dot(viewDir, reflectDir), 0), 32);
-        color.x += spec * g_env.LightColor.x;
-        color.y += spec * g_env.LightColor.y;
-        color.z += spec * g_env.LightColor.z;
-    }
+	// specular
+	if (!hit)
+	{
+		float3 viewDir = normalize(position - camPos);
+		float3 reflectDir = reflect(g_env.LightDirection, normal);
+		float spec = powf(fmaxf(dot(viewDir, reflectDir), 0), 32);
+		color.x += spec * g_env.LightColor.x;
+		color.y += spec * g_env.LightColor.y;
+		color.z += spec * g_env.LightColor.z;
+	}
 
-    // Ambient Occlusion
-    if (lDot == 0)
-    {
-        constexpr int samples = 0;
-        int x = blockIdx.x * blockDim.x + threadIdx.x;
-        int y = blockIdx.y * blockDim.y + threadIdx.y;
-        int seed = y * dFrameInfo.Resolution.x + x;
-        float occlusion = 0.0f;
-        for (int i = 0; i < samples; i++)
-        {
-            int si = seed + i * 1000 + (dFrameInfo.FrameNumber + 1) * 1000;
-            float3 sampleDir = make_float3(cudaNoise::randomFloat(si) * 2 - 1, cudaNoise::randomFloat(si * 10) * 2 - 1,
-                                           cudaNoise::randomFloat(si * 100) * 2 - 1);
-            sampleDir = normalize(sampleDir);
-            if (dot(sampleDir, normal) < 0)
-            {
-                sampleDir = reflect(sampleDir, normal);
-            }
+	// Ambient Occlusion
+	if (lDot == 0)
+	{
+		constexpr int samples = 0;
+		int x = blockIdx.x * blockDim.x + threadIdx.x;
+		int y = blockIdx.y * blockDim.y + threadIdx.y;
+		int seed = y * dFrameInfo.Resolution.x + x;
+		float occlusion = 0.0f;
+		for (int i = 0; i < samples; i++)
+		{
+			int si = seed + i * 1000 + (dFrameInfo.FrameNumber + 1) * 1000;
+			float3 sampleDir = make_float3(cudaNoise::randomFloat(si) * 2 - 1, cudaNoise::randomFloat(si * 10) * 2 - 1,
+				cudaNoise::randomFloat(si * 100) * 2 - 1);
+			sampleDir = normalize(sampleDir);
+			if (dot(sampleDir, normal) < 0)
+			{
+				sampleDir = reflect(sampleDir, normal);
+			}
 
-            float3 samplePos = position + normal * 0.01f;
-            float3 sampleNormal;
-            bool hit = Raytrace(8, samplePos, sampleDir, chunks[0], chunksData, chunkBoundingBoxes, factor, steps,
-                                sampleNormal, samplePos);
-            if (hit)
-            {
-                float dist = length(samplePos - position);
-                float occlusion = 1 - fminf(1 / (dist * 10.0f), 1.0f);
-                occlusion += occlusion;
-            }
-            else
-            {
-                occlusion += 1.0f;
-            }
-        }
+			float3 samplePos = position + normal * 0.01f;
+			float3 sampleNormal;
+			bool hit = Raytrace(8, samplePos, sampleDir, chunks[0], chunksData, chunkBoundingBoxes, factor, steps,
+				sampleNormal, samplePos);
+			if (hit)
+			{
+				float dist = length(samplePos - position);
+				float occlusion = 1 - fminf(1 / (dist * 10.0f), 1.0f);
+				occlusion += occlusion;
+			}
+			else
+			{
+				occlusion += 1.0f;
+			}
+		}
 
-        if (samples > 0)
-        {
-            occlusion /= samples;
-        }
-        else
-        {
-            occlusion = 1.0f;
-        }
+		if (samples > 0)
+		{
+			occlusion /= samples;
+		}
+		else
+		{
+			occlusion = 1.0f;
+		}
 
-        color *= occlusion;
-    }
+		color *= occlusion;
+	}
 
-    return color;
+	return color;
 }
 
 __device__ float3 Tonemap(float3 color)
 {
-    float3 tonemappedColor = color / (color + make_float3(1.0f));
-    tonemappedColor.x = fminf(fmaxf(tonemappedColor.x, 0), 1);
-    tonemappedColor.y = fminf(fmaxf(tonemappedColor.y, 0), 1);
-    tonemappedColor.z = fminf(fmaxf(tonemappedColor.z, 0), 1);
-    return tonemappedColor;
+	float3 tonemappedColor = color / (color + make_float3(1.0f));
+	tonemappedColor.x = fminf(fmaxf(tonemappedColor.x, 0), 1);
+	tonemappedColor.y = fminf(fmaxf(tonemappedColor.y, 0), 1);
+	tonemappedColor.z = fminf(fmaxf(tonemappedColor.z, 0), 1);
+	return tonemappedColor;
 }
 
 __global__ void screenDispatch(float3 origin, float3 camera_fwd, float3 camera_up, float3 camera_right,
-                               void *screen_texture,
-
-                               VoxelBuffer3D *chunks, VoxelBuffer3D *chunksData, Bounds3Df *chunkBoundingBoxes,
-                               int factor)
+	void* screen_texture, VoxelBuffer3D* chunks, VoxelBuffer3D* chunksData, Bounds3Df* chunkBoundingBoxes, int factor)
 {
 
 	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (ENABLE_CHECKERBOARD_RENDER) {
-        y *= 2;
-        if((x % 2) == 0) {
-            y += 1;
+	if (ENABLE_CHECKERBOARD_RENDER) {
+		y *= 2;
+		if ((x % 2) == 0) {
+			y += 1;
 		}
-        if (dFrameInfo.FrameNumber % 2 == 0) {
-            y += 1;
-        }
-    }
+		if (dFrameInfo.FrameNumber % 2 == 0) {
+			y += 1;
+		}
+	}
 
 	if (x >= dFrameInfo.Resolution.x || y >= dFrameInfo.Resolution.y || x < 0 || y < 0) return;
 
@@ -225,7 +222,7 @@ __global__ void screenDispatch(float3 origin, float3 camera_fwd, float3 camera_u
 		hitPos.z = fmodf(hitPos.z, 1.0f + FLT_EPS_DDA);
 
 		//top left
-		if (x < screen_width >> 1 && y < screen_height >> 1) {
+		if (x < screen_width >> 1 && y < screen_height > > 1) {
 			setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(normal.x, normal.y, normal.z));
 		}
 		//top right
@@ -278,54 +275,54 @@ __global__ void screenDispatch(float3 origin, float3 camera_fwd, float3 camera_u
 #endif
 }
 
-void Graphics::SetEnvironment(const Environment &env_v)
+void Graphics::SetEnvironment(const Environment& env_v)
 {
-    void *d_env;
-    cudaGetSymbolAddress(&d_env, g_env);
-    auto err = cudaGetLastError();
-    if (err != cudaSuccess)
-    {
-        std::cout << "Error: " << cudaGetErrorString(err) << std::endl;
-    }
-    cudaMemcpy(d_env, &env_v, sizeof(Environment), cudaMemcpyHostToDevice);
-    err = cudaGetLastError();
-    if (err != cudaSuccess)
-    {
-        std::cout << "Error: " << cudaGetErrorString(err) << std::endl;
-    }
+	void* d_env;
+	cudaGetSymbolAddress(&d_env, g_env);
+	auto err = cudaGetLastError();
+	if (err != cudaSuccess)
+	{
+		std::cout << "Error: " << cudaGetErrorString(err) << std::endl;
+	}
+	cudaMemcpy(d_env, &env_v, sizeof(Environment), cudaMemcpyHostToDevice);
+	err = cudaGetLastError();
+	if (err != cudaSuccess)
+	{
+		std::cout << "Error: " << cudaGetErrorString(err) << std::endl;
+	}
 }
 
 void Graphics::SetFOV(float fov)
 {
-    hFrameInfo.Fov = fov;
+	hFrameInfo.Fov = fov;
 }
 
 void Graphics::SetOrthoWindowSize(float2 size)
 {
-    hFrameInfo.OrthoSize = size;
+	hFrameInfo.OrthoSize = size;
 }
 
-void Graphics::RenderScreen(VoxelRaytracer3D *rt, uint32_t screen_width, uint32_t screen_height,
-                              void *d_screen_texture, float3 origin, float3 camera_fwd, float3 camera_up,
-                              float3 camera_right)
+void Graphics::RenderScreen(VoxelRaytracer3D* rt, uint32_t screen_width, uint32_t screen_height,
+	void* d_screen_texture, float3 origin, float3 camera_fwd, float3 camera_up,
+	float3 camera_right)
 {
-    hFrameInfo.Resolution = make_uint2(screen_width, screen_height);
-    cudaMemcpyToSymbol(dFrameInfo, &hFrameInfo, sizeof(RenderParams));
-    if (ENABLE_CHECKERBOARD_RENDER) {
-        screen_height = screen_height >> 1;
-    }
+	hFrameInfo.Resolution = make_uint2(screen_width, screen_height);
+	cudaMemcpyToSymbol(dFrameInfo, &hFrameInfo, sizeof(RenderParams));
+	if (ENABLE_CHECKERBOARD_RENDER) {
+		screen_height = screen_height >> 1;
+	}
 
-    dim3 blockSize(32, 1, 1);
-    dim3 numBlocks((screen_width + blockSize.x - 1) / blockSize.x, (screen_height + blockSize.y - 1) / blockSize.y, 1);
+	dim3 blockSize(32, 1, 1);
+	dim3 numBlocks((screen_width + blockSize.x - 1) / blockSize.x, (screen_height + blockSize.y - 1) / blockSize.y, 1);
 
-    auto buffer = rt->GetVoxelBuffer();
-    auto bufferDataBounds = rt->GetVoxelBufferDataBounds();
-    auto bufferData = rt->GetVoxelBufferDatas();
-    auto factor = rt->GetFactor();
-    hFrameInfo.FrameNumber++;
+	auto buffer = rt->GetVoxelBuffer();
+	auto bufferDataBounds = rt->GetVoxelBufferDataBounds();
+	auto bufferData = rt->GetVoxelBufferDatas();
+	auto factor = rt->GetFactor();
+	hFrameInfo.FrameNumber++;
 
-    screenDispatch<<<numBlocks, blockSize>>>(origin, camera_fwd, camera_up, camera_right,
-                                             d_screen_texture, buffer, bufferData, bufferDataBounds, factor);
+	screenDispatch << <numBlocks, blockSize >> > (origin, camera_fwd, camera_up, camera_right,
+		d_screen_texture, buffer, bufferData, bufferDataBounds, factor);
 
-    CUDA_SAFE_CALL(cudaDeviceSynchronize());
+	CUDA_SAFE_CALL(cudaDeviceSynchronize());
 }
