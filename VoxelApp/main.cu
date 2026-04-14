@@ -33,7 +33,7 @@ int main()
 
     delete[] buffer.grid.Raw();
     Renderer renderer("SDL Window");
-    if (!renderer.Init(width, height))
+    if (!renderer.Init(width, height, 1.0f))
     {
         return 1;
     }
