@@ -222,7 +222,7 @@ __global__ void screenDispatch(float3 origin, float3 camera_fwd, float3 camera_u
 		hitPos.z = fmodf(hitPos.z, 1.0f + FLT_EPS_DDA);
 
 		//top left
-		if (x < screen_width >> 1 && y < screen_height > > 1) {
+		if (x < screen_width >> 1 && y < screen_height >> 1) {
 			setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(normal.x, normal.y, normal.z));
 		}
 		//top right
