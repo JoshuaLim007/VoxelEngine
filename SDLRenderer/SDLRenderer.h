@@ -30,11 +30,10 @@ class Renderer
     {
         return window;
     }
-    float texScale = 1.0f;
     Renderer(std::string);
     void AddRenderEventCallback(std::function<void(const CallbackData &)>);
     ~Renderer();
-    bool Init(int width, int height);
+    bool Init(int width, int height, float scale);
     void Close();
     bool Render();
 };
