@@ -2,14 +2,15 @@
 #include "cuda_noise.cuh"
 using namespace GPUDDA;
 #define DEBUG_VIEW
+constexpr bool ENABLE_CHECKERBOARD_RENDER = true;
 
 struct RenderParams
 {
     uint2 Resolution;
-    size_t FrameNumber;
+    uint32_t FrameNumber;
     float Fov;
     float2 OrthoSize;
-    __device__ __host__ RenderParams(uint2 r, size_t n, float fov, float2 size)
+    __device__ __host__ RenderParams(uint2 r, uint32_t n, float fov, float2 size)
     {
         Resolution = r;
         FrameNumber = n;
@@ -20,8 +21,8 @@ struct RenderParams
     {
     }
 };
-__device__ RenderParams d_params;
-RenderParams h_params = RenderParams(make_uint2(0, 0), 0, 90, make_float2(10, 10));
+__device__ RenderParams dFrameInfo;
+RenderParams hFrameInfo = RenderParams(make_uint2(0, 0), 0, 90, make_float2(10, 10));
 
 __host__ __device__ void Graphics::GetDirections(float3 eularAngles, float3 *forwad, float3 *up, float3 *right)
 {
@@ -61,30 +62,28 @@ __device__ void getRayDirectionOrtho(float3 fwd, float3 up, float3 right, float2
                                      float3 &out_rayDir, float3 &out_rayOrigin)
 {
 
-    float ratio = static_cast<float>(d_params.Resolution.x) / d_params.Resolution.y;
+    float ratio = static_cast<float>(dFrameInfo.Resolution.x) / dFrameInfo.Resolution.y;
     out_rayDir = fwd;
     out_rayOrigin = origin;
     out_rayOrigin += right * (uv.x * 2 - 1) * screen_size.x * ratio;
     out_rayOrigin += up * (uv.y * 2 - 1) * screen_size.y;
 }
 
-template <typename T>
 __device__ void setPixelColor(void *screen_texture, uint32_t screen_width, uint32_t screen_height, int x, int y,
                               float3 color)
 {
-    T *pixels = (T *)screen_texture;
-    if (x < screen_width && y < screen_height)
-    {
-        T *pixel = &pixels[y * screen_width + x];
-        color.x = fminf(fmaxf(color.x, 0), 1);
-        color.y = fminf(fmaxf(color.y, 0), 1);
-        color.z = fminf(fmaxf(color.z, 0), 1);
+    GPUDDA::Graphics::BGRA8888 *pixels = (GPUDDA::Graphics::BGRA8888*)screen_texture;
+    if (x >= screen_width || y >= screen_height) return;
 
-        pixel->r = color.x * 255;
-        pixel->g = color.y * 255;
-        pixel->b = color.z * 255;
-        pixel->a = 255;
-    }
+    GPUDDA::Graphics::BGRA8888 *pixel = &pixels[y * screen_width + x];
+    color.x = fminf(fmaxf(color.x, 0), 1);
+    color.y = fminf(fmaxf(color.y, 0), 1);
+    color.z = fminf(fmaxf(color.z, 0), 1);
+
+    pixel->r = color.x * 255;
+    pixel->g = color.y * 255;
+    pixel->b = color.z * 255;
+    pixel->a = 255;
 }
 
 __device__ Graphics::Environment g_env;
@@ -124,11 +123,11 @@ __device__ float3 calculateColor(float3 camPos, float3 normal, float3 position, 
         constexpr int samples = 0;
         int x = blockIdx.x * blockDim.x + threadIdx.x;
         int y = blockIdx.y * blockDim.y + threadIdx.y;
-        int seed = y * d_params.Resolution.x + x;
+        int seed = y * dFrameInfo.Resolution.x + x;
         float occlusion = 0.0f;
         for (int i = 0; i < samples; i++)
         {
-            int si = seed + i * 1000 + (d_params.FrameNumber + 1) * 1000;
+            int si = seed + i * 1000 + (dFrameInfo.FrameNumber + 1) * 1000;
             float3 sampleDir = make_float3(cudaNoise::randomFloat(si) * 2 - 1, cudaNoise::randomFloat(si * 10) * 2 - 1,
                                            cudaNoise::randomFloat(si * 100) * 2 - 1);
             sampleDir = normalize(sampleDir);
@@ -178,92 +177,105 @@ __device__ float3 Tonemap(float3 color)
 }
 
 __global__ void screenDispatch(float3 origin, float3 camera_fwd, float3 camera_up, float3 camera_right,
-                               uint32_t screen_width, uint32_t screen_height, void *screen_texture,
+                               void *screen_texture,
 
                                VoxelBuffer3D *chunks, VoxelBuffer3D *chunksData, Bounds3Df *chunkBoundingBoxes,
                                int factor)
 {
 
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x < screen_width && y < screen_height)
-    {
-        float2 uv = make_float2(x / (float)screen_width, y / (float)screen_height);
-#ifdef ORTHO
-        float3 ray_dir;
-        getRayDirectionOrtho(camera_fwd, camera_up, camera_right, uv, d_params.OrthoSize, origin, ray_dir, origin);
-#else
-        auto ray_dir = getRayDirection(camera_fwd, camera_up, camera_right, make_uint2(screen_width, screen_height), make_float3(uv.x, uv.y, 0), d_params.Fov);
-#endif
-        int steps;
-        float3 normal;
-        float3 hitPos;
-        bool hit = Raytrace(MAX_STEPS, origin, ray_dir, chunks[0], chunksData, chunkBoundingBoxes, factor, steps, normal, hitPos);
-        normal = -normal;
-        if (hit)
-        {
-#ifdef DEBUG_VIEW
-            float dist = length(hitPos - origin);
-            hitPos.x = (hitPos.x) / 128.0f;
-            hitPos.y = (hitPos.y) / 128.0f;
-            hitPos.z = (hitPos.z) / 128.0f;
-            hitPos.x = fmodf(hitPos.x, 1.0f + FLT_EPS_DDA);
-            hitPos.y = fmodf(hitPos.y, 1.0f + FLT_EPS_DDA);
-            hitPos.z = fmodf(hitPos.z, 1.0f + FLT_EPS_DDA);
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-            //top left
-            if (x < screen_width >> 1 && y < screen_height >> 1) {
-                setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(normal.x, normal.y, normal.z));
-            }
-            //top right
-            else if(x >= screen_width >> 1 && y < screen_height >> 1){
-                setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(hitPos.x, hitPos.y, hitPos.z));
-            }
-            //bottom left
-            else if (x < screen_width >> 1) {
-           	//nothing
-            }
-            //bottom right
-            else {
-                setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(dist * 0.01f, 0, 0));
-            }
-
-            //setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y,
-            //make_float3(fmodf(dist, 1.0f),0,0));
-
-#else
-            int color_steps = 0;
-            float3 color =
-                calculateColor(origin, normal, hitPos, chunks, chunksData, chunkBoundingBoxes, factor, color_steps);
-            color = Tonemap(color);
-            steps += color_steps;
-            setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y,
-                                              make_float3(color.x, color.y, color.z));
-#endif
+    if (ENABLE_CHECKERBOARD_RENDER) {
+        y *= 2;
+        if((x % 2) == 0) {
+            y += 1;
+		}
+        if (dFrameInfo.FrameNumber % 2 == 0) {
+            y += 1;
         }
-        else
-        {
-            setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y,
-                                              make_float3(ray_dir.x, ray_dir.y, ray_dir.z));
-        }
-
-        // if center of screen
-        auto tx = threadIdx.x + blockIdx.x * blockDim.x;
-        auto ty = threadIdx.y + blockIdx.y * blockDim.y;
-        if (tx == d_params.Resolution.x >> 1 && ty == d_params.Resolution.y >> 1)
-        {
-            float3 color = make_float3(10, 10, 10);
-            setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y,
-                                              make_float3(color.x, color.y, color.z));
-        }
-
-#ifdef DEBUG_VIEW
-        //bottom left
-        if (x < screen_width >> 1 && y > screen_height >> 1) {
-            setPixelColor<Graphics::BGRA8888>(screen_texture, screen_width, screen_height, x, y, make_float3(steps / 256.0f, 0, 0));
-        }
-#endif
     }
+
+	if (x >= dFrameInfo.Resolution.x || y >= dFrameInfo.Resolution.y || x < 0 || y < 0) return;
+
+	int screen_width = dFrameInfo.Resolution.x;
+	int screen_height = dFrameInfo.Resolution.y;
+
+	float2 uv = make_float2(x / (float)screen_width, y / (float)screen_height);
+#ifdef ORTHO
+	float3 ray_dir;
+	getRayDirectionOrtho(camera_fwd, camera_up, camera_right, uv, dFrameInfo.OrthoSize, origin, ray_dir, origin);
+#else
+	auto ray_dir = getRayDirection(camera_fwd, camera_up, camera_right, make_uint2(screen_width, screen_height), make_float3(uv.x, uv.y, 0), dFrameInfo.Fov);
+#endif
+	int steps;
+	float3 normal;
+	float3 hitPos;
+	bool hit = Raytrace(MAX_STEPS, origin, ray_dir, chunks[0], chunksData, chunkBoundingBoxes, factor, steps, normal, hitPos);
+	normal = -normal;
+	if (hit)
+	{
+#ifdef DEBUG_VIEW
+		float dist = length(hitPos - origin);
+		hitPos.x = (hitPos.x) / 128.0f;
+		hitPos.y = (hitPos.y) / 128.0f;
+		hitPos.z = (hitPos.z) / 128.0f;
+		hitPos.x = fmodf(hitPos.x, 1.0f + FLT_EPS_DDA);
+		hitPos.y = fmodf(hitPos.y, 1.0f + FLT_EPS_DDA);
+		hitPos.z = fmodf(hitPos.z, 1.0f + FLT_EPS_DDA);
+
+		//top left
+		if (x < screen_width >> 1 && y < screen_height >> 1) {
+			setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(normal.x, normal.y, normal.z));
+		}
+		//top right
+		else if (x >= screen_width >> 1 && y < screen_height >> 1) {
+			setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(hitPos.x, hitPos.y, hitPos.z));
+		}
+		//bottom left
+		else if (x < screen_width >> 1) {
+			//nothing
+		}
+		//bottom right
+		else {
+			setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(dist * 0.01f, 0, 0));
+		}
+
+		//setPixelColor(screen_texture, screen_width, screen_height, x, y,
+		//make_float3(fmodf(dist, 1.0f),0,0));
+
+#else
+		int color_steps = 0;
+		float3 color =
+			calculateColor(origin, normal, hitPos, chunks, chunksData, chunkBoundingBoxes, factor, color_steps);
+		color = Tonemap(color);
+		steps += color_steps;
+		setPixelColor(screen_texture, screen_width, screen_height, x, y,
+			make_float3(color.x, color.y, color.z));
+#endif
+	}
+	else
+	{
+		setPixelColor(screen_texture, screen_width, screen_height, x, y,
+			make_float3(ray_dir.x, ray_dir.y, ray_dir.z));
+	}
+
+	// if center of screen
+	auto tx = threadIdx.x + blockIdx.x * blockDim.x;
+	auto ty = threadIdx.y + blockIdx.y * blockDim.y;
+	if (tx == dFrameInfo.Resolution.x >> 1 && ty == dFrameInfo.Resolution.y >> 1)
+	{
+		float3 color = make_float3(10, 10, 10);
+		setPixelColor(screen_texture, screen_width, screen_height, x, y,
+			make_float3(color.x, color.y, color.z));
+	}
+
+#ifdef DEBUG_VIEW
+	//bottom left
+	if (x < screen_width >> 1 && y > screen_height >> 1) {
+		setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(steps / 256.0f, 0, 0));
+	}
+#endif
 }
 
 void Graphics::SetEnvironment(const Environment &env_v)
@@ -285,32 +297,34 @@ void Graphics::SetEnvironment(const Environment &env_v)
 
 void Graphics::SetFOV(float fov)
 {
-    h_params.Fov = fov;
+    hFrameInfo.Fov = fov;
 }
 
 void Graphics::SetOrthoWindowSize(float2 size)
 {
-    h_params.OrthoSize = size;
+    hFrameInfo.OrthoSize = size;
 }
 
 void Graphics::RenderScreen(VoxelRaytracer3D *rt, uint32_t screen_width, uint32_t screen_height,
                               void *d_screen_texture, float3 origin, float3 camera_fwd, float3 camera_up,
                               float3 camera_right)
 {
+    hFrameInfo.Resolution = make_uint2(screen_width, screen_height);
+    cudaMemcpyToSymbol(dFrameInfo, &hFrameInfo, sizeof(RenderParams));
+    if (ENABLE_CHECKERBOARD_RENDER) {
+        screen_height = screen_height >> 1;
+    }
 
-    dim3 blockSize(8, 8, 1);
+    dim3 blockSize(32, 1, 1);
     dim3 numBlocks((screen_width + blockSize.x - 1) / blockSize.x, (screen_height + blockSize.y - 1) / blockSize.y, 1);
 
     auto buffer = rt->GetVoxelBuffer();
     auto bufferDataBounds = rt->GetVoxelBufferDataBounds();
     auto bufferData = rt->GetVoxelBufferDatas();
     auto factor = rt->GetFactor();
+    hFrameInfo.FrameNumber++;
 
-    h_params.Resolution = make_uint2(screen_width, screen_height);
-    cudaMemcpyToSymbol(d_params, &h_params, sizeof(RenderParams));
-    h_params.FrameNumber++;
-
-    screenDispatch<<<numBlocks, blockSize>>>(origin, camera_fwd, camera_up, camera_right, screen_width, screen_height,
+    screenDispatch<<<numBlocks, blockSize>>>(origin, camera_fwd, camera_up, camera_right,
                                              d_screen_texture, buffer, bufferData, bufferDataBounds, factor);
 
     CUDA_SAFE_CALL(cudaDeviceSynchronize());
