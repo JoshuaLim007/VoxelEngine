@@ -14,16 +14,15 @@ __global__ void PopulateVoxels(BitArray voxels, uint3 size)
     int z = blockIdx.z * blockDim.z + threadIdx.z;
 
     size_t max = static_cast<size_t>(size.x) * size.y * size.z;
-    float scale = 0.005;
+    float scale = 0.001;
 
     // 1d to 3d index
     float fx = x * scale;
     float fy = y * scale;
     float fz = z * scale;
-    float t = PerlinNoise(fx, fy, fz) * 1000;
+    float t = (PerlinNoise(fx, 0, fz) * 0.5 + 0.5) * 512;
     t = fmaxf(t, 0);
-    auto newIdx = x + y * size.x + z * size.x * size.y;
-    newIdx = GetSampleIndex(x, y, z, size.x, size.y);
+    auto newIdx = GetSampleIndex(x, y, z, size.x, size.y);
     if (y > t)
     {
         voxels[newIdx] = (0);
