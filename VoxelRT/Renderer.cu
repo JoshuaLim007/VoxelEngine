@@ -185,15 +185,15 @@ __global__ void screenDispatch(float3 origin, float3 camera_fwd, float3 camera_u
 
 	if (ENABLE_CHECKERBOARD_RENDER) {
 		y *= 2;
-		if ((x % 2) == 0) {
+		if ((x & 1) == 0) {
 			y += 1;
 		}
-		if (dFrameInfo.FrameNumber % 2 == 0) {
+		if ((dFrameInfo.FrameNumber & 1u) == 0) {
 			y += 1;
 		}
 	}
 
-	if (x >= dFrameInfo.Resolution.x || y >= dFrameInfo.Resolution.y || x < 0 || y < 0) return;
+	if (x >= dFrameInfo.Resolution.x || y >= dFrameInfo.Resolution.y) return;
 
 	int screen_width = dFrameInfo.Resolution.x;
 	int screen_height = dFrameInfo.Resolution.y;
@@ -257,16 +257,6 @@ __global__ void screenDispatch(float3 origin, float3 camera_fwd, float3 camera_u
 			make_float3(ray_dir.x, ray_dir.y, ray_dir.z));
 	}
 
-	// if center of screen
-	auto tx = threadIdx.x + blockIdx.x * blockDim.x;
-	auto ty = threadIdx.y + blockIdx.y * blockDim.y;
-	if (tx == dFrameInfo.Resolution.x >> 1 && ty == dFrameInfo.Resolution.y >> 1)
-	{
-		float3 color = make_float3(10, 10, 10);
-		setPixelColor(screen_texture, screen_width, screen_height, x, y,
-			make_float3(color.x, color.y, color.z));
-	}
-
 #ifdef DEBUG_VIEW
 	//bottom left
 	if (x < screen_width >> 1 && y > screen_height >> 1) {
@@ -312,7 +302,7 @@ void Graphics::RenderScreen(VoxelRaytracer3D* rt, uint32_t screen_width, uint32_
 		screen_height = screen_height >> 1;
 	}
 
-	dim3 blockSize(8, 8, 1);
+	dim3 blockSize(16, 16, 1);
 	dim3 numBlocks((screen_width + blockSize.x - 1) / blockSize.x, (screen_height + blockSize.y - 1) / blockSize.y, 1);
 
 	auto buffer = rt->GetVoxelBuffer();
@@ -323,6 +313,4 @@ void Graphics::RenderScreen(VoxelRaytracer3D* rt, uint32_t screen_width, uint32_
 
 	screenDispatch << <numBlocks, blockSize >> > (origin, camera_fwd, camera_up, camera_right,
 		d_screen_texture, buffer, bufferData, bufferDataBounds, factor);
-
-	CUDA_SAFE_CALL(cudaDeviceSynchronize());
 }

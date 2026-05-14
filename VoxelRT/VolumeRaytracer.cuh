@@ -312,6 +312,8 @@ namespace GPUDDA {
 		GPUDDA::VoxelBuffer3D* gpu_VoxelBuffer = nullptr;
 		GPUDDA::VoxelBuffer3D* gpu_VoxelBufferDatas = nullptr;
 		Bounds3Df* gpu_VoxelBufferDataBounds = nullptr;
+		uint32_t* gpu_VoxelBufferGridData = nullptr;
+		std::vector<uint32_t*> gpu_VoxelBufferDataGridPointers{};
 		float3 dimensions{};
 
 	public:
@@ -350,23 +352,51 @@ namespace GPUDDA {
 			factor = f;
 		}
 		void Free() {
-			if (gpu_VoxelBuffer != nullptr)
+			if (gpu_VoxelBufferGridData != nullptr) {
+				cudaFree(gpu_VoxelBufferGridData);
+				gpu_VoxelBufferGridData = nullptr;
+			}
+			if (gpu_VoxelBuffer != nullptr) {
 				cudaFree(gpu_VoxelBuffer);
-			if (gpu_VoxelBufferDatas != nullptr)
-				cudaFree(gpu_VoxelBufferDatas);
-			if (gpu_VoxelBufferDataBounds != nullptr)
-				cudaFree(gpu_VoxelBufferDataBounds);
+				gpu_VoxelBuffer = nullptr;
+			}
 
-			if (d_results != nullptr)
+			for (auto* ptr : gpu_VoxelBufferDataGridPointers) {
+				if (ptr != nullptr) {
+					cudaFree(ptr);
+				}
+			}
+			gpu_VoxelBufferDataGridPointers.clear();
+
+			if (gpu_VoxelBufferDatas != nullptr) {
+				cudaFree(gpu_VoxelBufferDatas);
+				gpu_VoxelBufferDatas = nullptr;
+			}
+			if (gpu_VoxelBufferDataBounds != nullptr) {
+				cudaFree(gpu_VoxelBufferDataBounds);
+				gpu_VoxelBufferDataBounds = nullptr;
+			}
+
+			if (d_results != nullptr) {
 				cudaFree(d_results);
-			if (d_results_normal != nullptr)
+				d_results = nullptr;
+			}
+			if (d_results_normal != nullptr) {
 				cudaFree(d_results_normal);
-			if (d_results_steps != nullptr)
+				d_results_normal = nullptr;
+			}
+			if (d_results_steps != nullptr) {
 				cudaFree(d_results_steps);
-			if (d_origins != nullptr)
+				d_results_steps = nullptr;
+			}
+			if (d_origins != nullptr) {
 				cudaFree(d_origins);
-			if (d_rays != nullptr)
+				d_origins = nullptr;
+			}
+			if (d_rays != nullptr) {
 				cudaFree(d_rays);
+				d_rays = nullptr;
+			}
 
 			resultsCPU = RayTraceResults<float3>(0); // Reset CPU results
 		}
