@@ -312,7 +312,7 @@ void Graphics::RenderScreen(VoxelRaytracer3D* rt, uint32_t screen_width, uint32_
 		screen_height = screen_height >> 1;
 	}
 
-	dim3 blockSize(32, 1, 1);
+	dim3 blockSize(8, 8, 1);
 	dim3 numBlocks((screen_width + blockSize.x - 1) / blockSize.x, (screen_height + blockSize.y - 1) / blockSize.y, 1);
 
 	auto buffer = rt->GetVoxelBuffer();
