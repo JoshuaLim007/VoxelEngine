@@ -26,10 +26,11 @@ int main()
     std::cout << "Voxel generation time: " << td << "ms" << std::endl;
 
     auto t2 = std::chrono::high_resolution_clock::now();
-    auto buffers = GenerateLowresVoxelBuffer(buffer, factor);
+    // V2: returns contiguous brick pool + Chebyshev distance field
+    auto buffers = GenerateLowresVoxelBufferV2(buffer, factor);
     auto t3 = std::chrono::high_resolution_clock::now();
     auto td2 = std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count();
-    std::cout << "Buffer generation time: " << td2 << "ms" << std::endl;
+    std::cout << "Buffer generation time (V2): " << td2 << "ms" << std::endl;
 
     delete[] buffer.grid.Raw();
     Renderer renderer("SDL Window");
@@ -39,14 +40,18 @@ int main()
     }
 
     VoxelRaytracer3D *raytracer = new GPUDDA::VoxelRaytracer3D(1);
-    auto low_res_buffer = std::get<0>(buffers);
-    auto low_res_grid_data = std::get<1>(buffers);
-    auto bounds = std::get<2>(buffers);
-    auto count = low_res_buffer.dimensions[0] * low_res_buffer.dimensions[1] * low_res_buffer.dimensions[2];
+    auto& low_res_buffer   = std::get<0>(buffers);
+    auto& pool_data        = std::get<1>(buffers);
+    auto& brick_indices    = std::get<2>(buffers);
+    uint32_t brick_words   = std::get<3>(buffers);
+    auto& dist_field       = std::get<4>(buffers);
+    auto dist_field_count  = dist_field.size();
     raytracer->UploadVoxelBuffer(low_res_buffer);
-    raytracer->UploadVoxelBufferDatas(low_res_grid_data, count);
-    raytracer->UploadVoxelBufferDataBounds(bounds, count);
+    raytracer->UploadBrickPool(pool_data, brick_indices, brick_words, (uint32_t)factor);
+    raytracer->UploadDistanceField(dist_field.data(), dist_field_count);
     raytracer->SetFactor(factor);
+    std::cout << "Occupied bricks: " << (pool_data.size() / brick_words) << " / "
+              << dist_field_count << " total" << std::endl;
 
     void *d_pixels;
     float3 cam_pos = {256, 256, 256};
@@ -124,8 +129,6 @@ int main()
             cam_pos -= cam_forward * cam_speed;
         }
 
-        SetOrthoWindowSize(orthoWindowSize);
-
         if (currentKeyStates[SDL_SCANCODE_A])
         {
             cam_pos -= cam_right * cam_speed;
@@ -163,7 +166,7 @@ int main()
         //std::cout << "Cam Forward: " << cam_forward.x << ", " << cam_forward.y << ", " << cam_forward.z << std::endl;
 
         GetDirections(cam_eular, &cam_forward, &cam_up, &cam_right);
-        RenderScreen(raytracer, width, height, d_pixels, cam_pos, cam_forward, cam_up, cam_right);
+        RenderScreenFast(raytracer, width, height, d_pixels, cam_pos, cam_forward, cam_up, cam_right);
         cudaMemcpy(data.pixels, d_pixels, width * height * sizeof(PixelData), cudaMemcpyDeviceToHost);
     });
 

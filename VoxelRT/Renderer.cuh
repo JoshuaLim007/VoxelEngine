@@ -53,6 +53,17 @@ namespace GPUDDA
 			float3 camera_fwd,
 			float3 camera_up,
 			float3 camera_right);
+
+		// Optimised path: uses BrickPool + distance-field skipping
+		void RenderScreenFast(
+			VoxelRaytracer3D* rt,
+			uint32_t screen_width,
+			uint32_t screen_height,
+			void* d_screen_texture,
+			float3 origin,
+			float3 camera_fwd,
+			float3 camera_up,
+			float3 camera_right);
 	}
 }
 #endif

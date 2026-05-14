@@ -34,10 +34,10 @@ __host__ __device__ BitRef& BitRef::operator=(bool value)
 #endif
     return *this;
 }
-__device__ __host__ BitArray::BitArray() : size(0), data(nullptr)
+__host__ BitArray::BitArray() : size(0), data(nullptr)
 {
 }
-__device__ __host__ BitArray::BitArray(const BitArray &other, bool isGPU) : size(other.size)
+__host__ BitArray::BitArray(const BitArray &other, bool isGPU) : size(other.size)
 {
     if (isGPU)
     {
@@ -48,7 +48,7 @@ __device__ __host__ BitArray::BitArray(const BitArray &other, bool isGPU) : size
     data = new uint32_t[(size + 31) / 32];
     std::copy(other.data, other.data + (size + 31) / 32, data);
 }
-__device__ __host__ BitArray::BitArray(size_t num_bits, bool isGPU) : size(num_bits)
+__host__ BitArray::BitArray(size_t num_bits, bool isGPU) : size(num_bits)
 {
     if (isGPU)
     {
@@ -145,7 +145,15 @@ __device__ bool RayIntersectsAABB(const float3 &start, const float3 &direction, 
     float t1_z = fminf(t_min_z, t_max_z);
     float t2_z = fmaxf(t_min_z, t_max_z);
 
-    float t_min = fmaxf(fmaxf(t1_x, t1_y), t1_z); // Largest entering time
+    // Determine which axis had the largest entering time (the entry face).
+    // Use an explicit argmax rather than floating-point equality to avoid
+    // misidentifying the axis when two slab values are numerically equal.
+    float t_min;
+    int   normalAxis; // 0=x, 1=y, 2=z
+    if (t1_x >= t1_y && t1_x >= t1_z) { t_min = t1_x; normalAxis = 0; }
+    else if (t1_y >= t1_z)             { t_min = t1_y; normalAxis = 1; }
+    else                               { t_min = t1_z; normalAxis = 2; }
+
     float t_max = fminf(fminf(t2_x, t2_y), t2_z); // Smallest exiting time
 
     if (t_max < fmaxf(t_min, 0.0f))
@@ -159,18 +167,12 @@ __device__ bool RayIntersectsAABB(const float3 &start, const float3 &direction, 
 
     if (out_normal)
     {
-        if (t_min == t1_x)
-        {
+        if (normalAxis == 0)
             *out_normal = make_float3((inv_dir_x < 0.0f) ? -1.0f : 1.0f, 0.0f, 0.0f);
-        }
-        else if (t_min == t1_y)
-        {
+        else if (normalAxis == 1)
             *out_normal = make_float3(0.0f, (inv_dir_y < 0.0f) ? -1.0f : 1.0f, 0.0f);
-        }
         else
-        { // t_min == t1_z
             *out_normal = make_float3(0.0f, 0.0f, (inv_dir_z < 0.0f) ? -1.0f : 1.0f);
-        }
     }
 
     return true;
@@ -209,6 +211,7 @@ __device__ void DDARayTraversal(const DDARayParams<float3, 3> &Params, DDARayRes
 
     DDARayResults<float3> returnResults;
     returnResults.HitIntersectedPoint = make_float3(x, y, z);
+    returnResults.HitNormal = make_float3(0.0f, 0.0f, 0.0f);
     returnResults.hit = false;
     returnResults.isOutOfBounds = false;
     returnResults.stepsTaken = 0;
@@ -364,6 +367,7 @@ __device__ void DDARayTraversal(const DDARayParams<float3, 3> &Params, DDARayRes
                 if (isOutOfBounds)
                 {
                     returnResults.isOutOfBounds = true;
+                    returnResults.stepsTaken += 1;
                     break;
                 }
             }
@@ -372,6 +376,7 @@ __device__ void DDARayTraversal(const DDARayParams<float3, 3> &Params, DDARayRes
         }
         else
         {
+            returnResults.stepsTaken += 1;
             returnResults.NextCell = make_float3(cell_x, cell_y, cell_z);
             break;
         }
@@ -405,7 +410,22 @@ __device__ bool Raytrace(int maxSteps, float3 origin, float3 ray, VoxelBuffer3D 
                                           chunks.dimensions[2] - FLT_EPS_DDA),
                               &intersect, &start_normal))
         {
+            // Clamp the entry point so that large t_min multiplications (camera far
+            // outside) cannot push it fractionally outside the valid grid range.
+            intersect.x = fmaxf(intersect.x, (float)FLT_EPS_DDA);
+            intersect.y = fmaxf(intersect.y, (float)FLT_EPS_DDA);
+            intersect.z = fmaxf(intersect.z, (float)FLT_EPS_DDA);
+            intersect.x = fminf(intersect.x, chunks.dimensions[0] - (float)FLT_EPS_DDA);
+            intersect.y = fminf(intersect.y, chunks.dimensions[1] - (float)FLT_EPS_DDA);
+            intersect.z = fminf(intersect.z, chunks.dimensions[2] - (float)FLT_EPS_DDA);
             start = intersect;
+        }
+        else
+        {
+            // Ray entirely misses the voxel grid — no hit possible.
+            out_normal = make_float3(0, 0, 0);
+            out_steps  = 0;
+            return false;
         }
     }
     out_normal = make_float3(0, 0, 0);
@@ -626,6 +646,257 @@ void VoxelRaytracer3D::UploadVoxelBufferDataBounds(Bounds3Df *bounds, size_t cou
     auto memSize = sizeof(Bounds3Df) * count;
     cudaMalloc((void **)&gpu_VoxelBufferDataBounds, memSize);
     cudaMemcpy(gpu_VoxelBufferDataBounds, bounds, memSize, cudaMemcpyHostToDevice);
+}
+
+void VoxelRaytracer3D::UploadBrickPool(const std::vector<uint32_t>& pool_data,
+                                        const std::vector<uint32_t>& indices,
+                                        uint32_t brick_words, uint32_t brick_dim)
+{
+    // Free previous
+    if (gpu_BrickPoolData != nullptr) { cudaFree(gpu_BrickPoolData); gpu_BrickPoolData = nullptr; }
+    if (gpu_BrickIndices  != nullptr) { cudaFree(gpu_BrickIndices);  gpu_BrickIndices  = nullptr; }
+
+    size_t dataBytes    = pool_data.size() * sizeof(uint32_t);
+    size_t indicesBytes = indices.size()   * sizeof(uint32_t);
+
+    cudaMalloc((void**)&gpu_BrickPoolData, dataBytes);
+    cudaMalloc((void**)&gpu_BrickIndices,  indicesBytes);
+    cudaMemcpy(gpu_BrickPoolData, pool_data.data(), dataBytes,    cudaMemcpyHostToDevice);
+    cudaMemcpy(gpu_BrickIndices,  indices.data(),   indicesBytes, cudaMemcpyHostToDevice);
+
+    gpu_BrickPool.data        = gpu_BrickPoolData;
+    gpu_BrickPool.indices     = gpu_BrickIndices;
+    gpu_BrickPool.brick_words = brick_words;
+    gpu_BrickPool.brick_dim   = brick_dim;
+}
+
+void VoxelRaytracer3D::UploadDistanceField(const uint8_t* df, size_t count)
+{
+    if (gpu_DistField != nullptr) { cudaFree(gpu_DistField); gpu_DistField = nullptr; }
+    cudaMalloc((void**)&gpu_DistField, count * sizeof(uint8_t));
+    cudaMemcpy(gpu_DistField, df, count * sizeof(uint8_t), cudaMemcpyHostToDevice);
+}
+
+// ---------------------------------------------------------------------------
+// RaytraceFast: two-level DDA with brick-pool lookup + distance-field skipping
+// ---------------------------------------------------------------------------
+__device__ bool RaytraceFast(int maxSteps, float3 origin, float3 ray,
+    VoxelBuffer3D chunks, BrickPool bricks, const uint8_t* distField,
+    int factor, int& out_steps, float3& out_normal, float3& out_pos)
+{
+    float3 start = origin;
+    const float invFactor = 1.0f / (float)factor;
+    start.x *= invFactor;
+    start.y *= invFactor;
+    start.z *= invFactor;
+
+    const int lW = chunks.dimensions[0];
+    const int lH = chunks.dimensions[1];
+    const int lD = chunks.dimensions[2];
+
+    // ---- Clip start to the low-res grid AABB ----
+    float3 start_normal = make_float3(0.0f, 0.0f, 0.0f);
+    if (!(start.x >= 0 && start.y >= 0 && start.z >= 0 &&
+          start.x < lW && start.y < lH && start.z < lD))
+    {
+        float3 intersect;
+        if (!RayIntersectsAABB(start, ray,
+            make_float3((float)FLT_EPS_DDA, (float)FLT_EPS_DDA, (float)FLT_EPS_DDA),
+            make_float3(lW - (float)FLT_EPS_DDA, lH - (float)FLT_EPS_DDA, lD - (float)FLT_EPS_DDA),
+            &intersect, &start_normal))
+        {
+            return false;
+        }
+        // Clamp the entry point so that large t_min multiplications (camera far
+        // outside) cannot push it fractionally outside the valid grid range.
+        intersect.x = fmaxf(intersect.x, (float)FLT_EPS_DDA);
+        intersect.y = fmaxf(intersect.y, (float)FLT_EPS_DDA);
+        intersect.z = fmaxf(intersect.z, (float)FLT_EPS_DDA);
+        intersect.x = fminf(intersect.x, lW - (float)FLT_EPS_DDA);
+        intersect.y = fminf(intersect.y, lH - (float)FLT_EPS_DDA);
+        intersect.z = fminf(intersect.z, lD - (float)FLT_EPS_DDA);
+        start = intersect;
+    }
+
+    // ---- Outer DDA setup (low-res-cell coordinate space) ----
+    //   t-parameter: pos_lowres = start + t * ray  (ray is world-space normalised,
+    //   so t=1 moves 1 world unit = 1/factor low-res units).
+    //   Cell boundary crossings in low-res space are handled correctly because
+    //   `start` is in low-res coords and `ray` has a consistent t-unit.
+    const float ox = start.x, oy = start.y, oz = start.z;
+    const float dx = ray.x,  dy = ray.y,   dz = ray.z;
+
+    int cx = (int)ox, cy = (int)oy, cz = (int)oz;
+    const int sx = (dx > 0) ? 1 : -1;
+    const int sy = (dy > 0) ? 1 : -1;
+    const int sz = (dz > 0) ? 1 : -1;
+
+    const float tdx = (dx != 0.0f) ? fabsf(1.0f / dx) : FLT_INF;
+    const float tdy = (dy != 0.0f) ? fabsf(1.0f / dy) : FLT_INF;
+    const float tdz = (dz != 0.0f) ? fabsf(1.0f / dz) : FLT_INF;
+
+    float tmx = (dx != 0.0f) ? (((cx + (sx > 0)) - ox) / dx) : FLT_INF;
+    float tmy = (dy != 0.0f) ? (((cy + (sy > 0)) - oy) / dy) : FLT_INF;
+    float tmz = (dz != 0.0f) ? (((cz + (sz > 0)) - oz) / dz) : FLT_INF;
+
+    float3 hitNormal = start_normal;
+    float3 hitPos    = make_float3(0.0f, 0.0f, 0.0f);
+    bool   hit       = false;
+    int    total     = 0;
+
+    const uint32_t* gridRaw = chunks.grid.Raw();
+    const int   bd     = (int)bricks.brick_dim;
+    const float fbd    = (float)bd;
+    const float inv_bd = 1.0f / fbd;
+
+    // Helper lambda (expressed as a macro to avoid CUDA lambda pitfalls):
+    // Advances outer DDA one step, updating cx/cy/cz, tmx/tmy/tmz, hitNormal.
+#define DDA_OUTER_STEP()                                       \
+    do {                                                        \
+        ++total;                                               \
+        if (tmx < tmy && tmx < tmz) {                         \
+            cx += sx; tmx += tdx;                              \
+            hitNormal = make_float3((float)sx, 0.0f, 0.0f);   \
+        } else if (tmy <= tmx && tmy < tmz) {                  \
+            cy += sy; tmy += tdy;                              \
+            hitNormal = make_float3(0.0f, (float)sy, 0.0f);   \
+        } else {                                               \
+            cz += sz; tmz += tdz;                              \
+            hitNormal = make_float3(0.0f, 0.0f, (float)sz);   \
+        }                                                      \
+    } while(0)
+
+    for (int step = 0; step < maxSteps; ++step)
+    {
+        // ---- Out-of-bounds: ray left the grid ----
+        if ((unsigned)cx >= (unsigned)lW ||
+            (unsigned)cy >= (unsigned)lH ||
+            (unsigned)cz >= (unsigned)lD)
+            break;
+
+        const uint32_t chunkIdx = GetSampleIndex(cx, cy, cz, lW, lH);
+        const bool occupied = ((gridRaw[chunkIdx >> 5] >> (chunkIdx & 31)) & 1u) != 0;
+
+        if (!occupied)
+        {
+            // ---- Distance-field empty-space skip ----
+            // distField[i] = Chebyshev distance (in low-res cells) to nearest
+            // occupied cell. Value d means cells [0..d-1] from current are empty.
+            // We skip d-1 EXTRA cells by actually stepping the DDA d-1 more times
+            // (so no cell-coordinate desync). The standard step at the bottom
+            // advances 1 more cell, for a total of d cells skipped.
+            const int d = (int)distField[chunkIdx];
+            for (int k = 1; k < d && total < maxSteps; ++k)
+            {
+                DDA_OUTER_STEP();
+                if ((unsigned)cx >= (unsigned)lW ||
+                    (unsigned)cy >= (unsigned)lH ||
+                    (unsigned)cz >= (unsigned)lD)
+                    goto done;
+            }
+        }
+        else
+        {
+            const uint32_t brickSlot = bricks.indices[chunkIdx];
+            if (brickSlot != UINT32_MAX)
+            {
+                const uint32_t* brickData =
+                    bricks.data + (size_t)brickSlot * bricks.brick_words;
+
+                // ---- Compute ray entry time into current outer cell ----
+                // At this point in the DDA, tmx/tmy/tmz hold the t-values of
+                // the NEXT boundary for each axis.  tmx - tdx is the t when the
+                // ray last crossed an x-boundary, i.e. when it entered this cell.
+                // Entry time = max of all three "last crossed" values, clamped ≥ 0
+                // (negative means the ray started inside the grid already).
+                float tEntry = fmaxf(fmaxf(tmx - tdx, tmy - tdy), tmz - tdz);
+                tEntry = fmaxf(tEntry, 0.0f);
+
+                // ---- Brick-local ray start in [0, bd) ----
+                float blx = (ox + tEntry * dx - (float)cx) * fbd;
+                float bly = (oy + tEntry * dy - (float)cy) * fbd;
+                float blz = (oz + tEntry * dz - (float)cz) * fbd;
+                blx = fmaxf(0.0f, fminf(blx, fbd - 1e-4f));
+                bly = fmaxf(0.0f, fminf(bly, fbd - 1e-4f));
+                blz = fmaxf(0.0f, fminf(blz, fbd - 1e-4f));
+
+                int bx = (int)blx, by = (int)bly, bz = (int)blz;
+
+                // Inner tDelta: one brick cell = 1/bd outer cell = tdx/bd of t.
+                const float itdx = tdx * inv_bd;
+                const float itdy = tdy * inv_bd;
+                const float itdz = tdz * inv_bd;
+
+                // Inner tMax: t-offset from tEntry to the first brick-cell boundary.
+                // Rate in brick-space: dx * bd brick-units per t-unit.
+                // Distance to next boundary: (bx+(sx>0)) - blx  (in brick units).
+                float itmx = (dx != 0.0f) ? (((bx + (sx > 0)) - blx) / (dx * fbd)) : FLT_INF;
+                float itmy = (dy != 0.0f) ? (((by + (sy > 0)) - bly) / (dy * fbd)) : FLT_INF;
+                float itmz = (dz != 0.0f) ? (((bz + (sz > 0)) - blz) / (dz * fbd)) : FLT_INF;
+
+                // Initialise to the outer-cell entry face normal so that if
+                // the very first inner cell is occupied (is==0), we return the
+                // correct boundary normal rather than (0,0,0).
+                float3 innerNormal = hitNormal;
+                bool innerHit = false;
+
+                for (int is = 0; is < 512; ++is)
+                {
+                    if ((unsigned)bx >= (unsigned)bd ||
+                        (unsigned)by >= (unsigned)bd ||
+                        (unsigned)bz >= (unsigned)bd)
+                        break;
+
+                    const uint32_t vi = GetSampleIndex(bx, by, bz, bd, bd);
+                    if ((brickData[vi >> 5] >> (vi & 31)) & 1u)
+                    {
+                        // Entry t of this brick cell = tEntry + max(last-axis-crossing-dt)
+                        // All inner tMax values are dt offsets from tEntry.
+                        // itmx - itdx = dt of x-entry of current cell. max gives cell entry dt.
+                        float it = fmaxf(fmaxf(itmx - itdx, itmy - itdy), itmz - itdz);
+                        it = fmaxf(it, 0.0f);
+                        const float globalT = tEntry + it;
+                        // World-space hit: start_world = origin, move globalT in
+                        // low-res units * factor = world units.
+                        hitPos.x = (ox + globalT * dx) * (float)factor;
+                        hitPos.y = (oy + globalT * dy) * (float)factor;
+                        hitPos.z = (oz + globalT * dz) * (float)factor;
+                        hitNormal = innerNormal;
+                        total += is;
+                        innerHit = true;
+                        break;
+                    }
+
+                    // Step inner DDA
+                    if (itmx < itmy && itmx < itmz) {
+                        bx += sx; itmx += itdx;
+                        innerNormal = make_float3((float)sx, 0.0f, 0.0f);
+                    } else if (itmy <= itmx && itmy < itmz) {
+                        by += sy; itmy += itdy;
+                        innerNormal = make_float3(0.0f, (float)sy, 0.0f);
+                    } else {
+                        bz += sz; itmz += itdz;
+                        innerNormal = make_float3(0.0f, 0.0f, (float)sz);
+                    }
+                }
+
+                if (innerHit) { hit = true; goto done; }
+            }
+            // Occupied chunk with UINT32_MAX slot means it's marked occupied in the
+            // low-res bitmask but has no brick data — treat as empty and continue.
+        }
+
+        // ---- Advance outer DDA one cell ----
+        DDA_OUTER_STEP();
+    }
+
+done:
+#undef DDA_OUTER_STEP
+
+    out_steps  = total;
+    out_normal = hitNormal;
+    if (hit) out_pos = hitPos;
+    return hit;
 }
 
 RayTraceResults<float3> VoxelRaytracer3D::Raytrace(std::vector<float3> origin, std::vector<float3> ray)

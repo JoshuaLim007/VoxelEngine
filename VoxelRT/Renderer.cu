@@ -98,7 +98,7 @@ __device__ float3 calculateColor(float3 camPos, float3 normal, float3 position, 
 	float3 shadowPos = position + shadowRay * 0.01f;
 
 	float3 shadowNormal;
-	int steps;
+	int steps = 0;
 	bool hit = false;// Raytrace(MAX_STEPS, shadowPos, shadowRay, chunks[0], chunksData, chunkBoundingBoxes, factor, steps, shadowNormal, shadowPos);
 	out_steps += steps;
 	float lDot = fmaxf(dot(normal, g_env.LightDirection), 0) * (hit ? 0 : 1);
@@ -109,8 +109,8 @@ __device__ float3 calculateColor(float3 camPos, float3 normal, float3 position, 
 	// specular
 	if (!hit)
 	{
-		float3 viewDir = normalize(position - camPos);
-		float3 reflectDir = reflect(g_env.LightDirection, normal);
+		float3 viewDir = normalize(camPos - position);          // surface → camera
+		float3 reflectDir = reflect(-g_env.LightDirection, normal); // incident = light→surface
 		float spec = powf(fmaxf(dot(viewDir, reflectDir), 0), 32);
 		color.x += spec * g_env.LightColor.x;
 		color.y += spec * g_env.LightColor.y;
@@ -143,8 +143,8 @@ __device__ float3 calculateColor(float3 camPos, float3 normal, float3 position, 
 			if (hit)
 			{
 				float dist = length(samplePos - position);
-				float occlusion = 1 - fminf(1 / (dist * 10.0f), 1.0f);
-				occlusion += occlusion;
+				float sampleOcclusion = 1.0f - fminf(1.0f / (dist * 10.0f), 1.0f);
+				occlusion += sampleOcclusion;
 			}
 			else
 			{
@@ -263,6 +263,100 @@ __global__ void screenDispatch(float3 origin, float3 camera_fwd, float3 camera_u
 		setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(steps / 256.0f, 0, 0));
 	}
 #endif
+}
+
+// ---------------------------------------------------------------------------
+// Fast kernel: BrickPool (no pointer-chasing) + distance-field empty-skip
+// ---------------------------------------------------------------------------
+__global__ void screenDispatchFast(float3 origin, float3 camera_fwd, float3 camera_up, float3 camera_right,
+	void* screen_texture, VoxelBuffer3D* chunks, BrickPool bricks, const uint8_t* distField, int factor)
+{
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (ENABLE_CHECKERBOARD_RENDER) {
+		y *= 2;
+		if ((x & 1) == 0) y += 1;
+		if ((dFrameInfo.FrameNumber & 1u) == 0) y += 1;
+	}
+
+	if (x >= dFrameInfo.Resolution.x || y >= dFrameInfo.Resolution.y) return;
+
+	const int screen_width  = dFrameInfo.Resolution.x;
+	const int screen_height = dFrameInfo.Resolution.y;
+	float2 uv = make_float2(x / (float)screen_width, y / (float)screen_height);
+
+#ifdef ORTHO
+	float3 ray_dir;
+	getRayDirectionOrtho(camera_fwd, camera_up, camera_right, uv, dFrameInfo.OrthoSize, origin, ray_dir, origin);
+#else
+	auto ray_dir = getRayDirection(camera_fwd, camera_up, camera_right,
+		make_uint2(screen_width, screen_height), make_float3(uv.x, uv.y, 0), dFrameInfo.Fov);
+#endif
+
+	int    steps;
+	float3 normal, hitPos;
+	bool hit = RaytraceFast(MAX_STEPS, origin, ray_dir, chunks[0], bricks, distField,
+		factor, steps, normal, hitPos);
+	normal = -normal;
+
+	if (hit)
+	{
+#ifdef DEBUG_VIEW
+		float dist = length(hitPos - origin);
+		float3 hp = hitPos;
+		hp.x = fmodf(hp.x / 128.0f, 1.0f + FLT_EPS_DDA);
+		hp.y = fmodf(hp.y / 128.0f, 1.0f + FLT_EPS_DDA);
+		hp.z = fmodf(hp.z / 128.0f, 1.0f + FLT_EPS_DDA);
+		if      (x < screen_width>>1 && y < screen_height>>1)
+			setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(normal.x, normal.y, normal.z));
+		else if (x >= screen_width>>1 && y < screen_height>>1)
+			setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(hp.x, hp.y, hp.z));
+		else if (x >= screen_width>>1)
+			setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(dist * 0.01f, 0, 0));
+#else
+		int color_steps = 0;
+		float3 color = calculateColor(origin, normal, hitPos, chunks,
+			/*chunksData=*/nullptr, /*bounds=*/nullptr, factor, color_steps);
+		color = Tonemap(color);
+		setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(color.x, color.y, color.z));
+#endif
+	}
+	else
+	{
+		setPixelColor(screen_texture, screen_width, screen_height, x, y,
+			make_float3(ray_dir.x, ray_dir.y, ray_dir.z));
+	}
+
+#ifdef DEBUG_VIEW
+	if (x < screen_width>>1 && y > screen_height>>1)
+		setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(steps / 256.0f, 0, 0));
+#endif
+}
+
+void Graphics::RenderScreenFast(VoxelRaytracer3D* rt, uint32_t screen_width, uint32_t screen_height,
+	void* d_screen_texture, float3 origin, float3 camera_fwd, float3 camera_up,
+	float3 camera_right)
+{
+	hFrameInfo.Resolution = make_uint2(screen_width, screen_height);
+	cudaMemcpyToSymbol(dFrameInfo, &hFrameInfo, sizeof(RenderParams));
+
+	uint32_t dispatch_h = screen_height;
+	if (ENABLE_CHECKERBOARD_RENDER) dispatch_h >>= 1;
+
+	dim3 blockSize(16, 16, 1);
+	dim3 numBlocks((screen_width  + blockSize.x - 1) / blockSize.x,
+	               (dispatch_h   + blockSize.y - 1) / blockSize.y, 1);
+
+	auto buffer     = rt->GetVoxelBuffer();
+	auto brickPool  = rt->GetBrickPool();
+	auto distField  = rt->GetDistanceField();
+	int  factor     = rt->GetFactor();
+	hFrameInfo.FrameNumber++;
+
+	screenDispatchFast<<<numBlocks, blockSize>>>(
+		origin, camera_fwd, camera_up, camera_right,
+		d_screen_texture, buffer, brickPool, distField, factor);
 }
 
 void Graphics::SetEnvironment(const Environment& env_v)
