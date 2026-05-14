@@ -4,7 +4,7 @@
 #include "VolumeRaytracer.cuh"
 #include "Renderer.cuh"
 #include "SDLRenderer.h"
-#include "VoxelWorldBuilder.cuh"
+#include "ChunkStreamingManager.cuh"
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -17,21 +17,8 @@ constexpr uint32_t height = 720;
 
 int main()
 {
-    // TODO: goal, 128k x 512 x 128k
-    int factor = 32;
-    auto t0 = std::chrono::high_resolution_clock::now();
-    auto buffer = CreateVoxels(make_uint3(4096, 512, 4096));
-    auto t1 = std::chrono::high_resolution_clock::now();
-    auto td = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
-    std::cout << "Voxel generation time: " << td << "ms" << std::endl;
+    constexpr int factor = GPUDDA::STREAM_BRICK_DIM;
 
-    auto t2 = std::chrono::high_resolution_clock::now();
-    auto buffers = GenerateLowresVoxelBuffer(buffer, factor);
-    auto t3 = std::chrono::high_resolution_clock::now();
-    auto td2 = std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count();
-    std::cout << "Buffer generation time: " << td2 << "ms" << std::endl;
-
-    delete[] buffer.grid.Raw();
     Renderer renderer("SDL Window");
     if (!renderer.Init(width, height, 1.0f))
     {
@@ -39,21 +26,22 @@ int main()
     }
 
     VoxelRaytracer3D *raytracer = new GPUDDA::VoxelRaytracer3D(1);
-    auto low_res_buffer = std::get<0>(buffers);
-    auto low_res_grid_data = std::get<1>(buffers);
-    auto bounds = std::get<2>(buffers);
-    auto count = low_res_buffer.dimensions[0] * low_res_buffer.dimensions[1] * low_res_buffer.dimensions[2];
-    raytracer->UploadVoxelBuffer(low_res_buffer);
-    raytracer->UploadVoxelBufferDatas(low_res_grid_data, count);
-    raytracer->UploadVoxelBufferDataBounds(bounds, count);
-    raytracer->SetFactor(factor);
+
+    // Streaming manager owns all GPU voxel memory
+    GPUDDA::ChunkStreamingManager streamingMgr;
+    const uint32_t brick_words =
+        ((uint32_t)factor * (uint32_t)factor * (uint32_t)factor + 31u) / 32u;
+    streamingMgr.Init(raytracer, brick_words);
 
     void *d_pixels;
-    float3 cam_pos = {256, 256, 256};
-    float3 cam_up = {0, 1, 0};
-    float3 cam_right = {1, 0, 0};
+    float3 cam_pos     = {256, 256, 256};
+    float3 cam_up      = {0, 1, 0};
+    float3 cam_right   = {1, 0, 0};
     float3 cam_forward = {0, 0, 1};
-    float3 cam_eular = {0, 0, 0};
+    float3 cam_eular   = {0, 0, 0};
+
+    // Block until enough chunks around the camera are loaded to show something
+    streamingMgr.WaitForInitialChunks(raytracer, cam_pos, /*min_chunks=*/4);
 
     Graphics::Environment env;
     env.LightDirection = {1, 1, 1};
@@ -124,8 +112,6 @@ int main()
             cam_pos -= cam_forward * cam_speed;
         }
 
-        SetOrthoWindowSize(orthoWindowSize);
-
         if (currentKeyStates[SDL_SCANCODE_A])
         {
             cam_pos -= cam_right * cam_speed;
@@ -163,7 +149,9 @@ int main()
         //std::cout << "Cam Forward: " << cam_forward.x << ", " << cam_forward.y << ", " << cam_forward.z << std::endl;
 
         GetDirections(cam_eular, &cam_forward, &cam_up, &cam_right);
-        RenderScreen(raytracer, width, height, d_pixels, cam_pos, cam_forward, cam_up, cam_right);
+        streamingMgr.UpdateCamera(cam_pos, cam_forward);
+        streamingMgr.FlushUploads(raytracer);
+        RenderScreenFast(raytracer, width, height, d_pixels, cam_pos, cam_forward, cam_up, cam_right);
         cudaMemcpy(data.pixels, d_pixels, width * height * sizeof(PixelData), cudaMemcpyDeviceToHost);
     });
 

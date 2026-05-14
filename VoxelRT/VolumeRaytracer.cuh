@@ -13,6 +13,7 @@
 #include <tuple>
 #include <thread>
 #include <mutex>
+#include <algorithm>
 
 #define SAMPLE_MODE_TILED_LINEAR
 //#define SAMPLE_MODE_MORTON
@@ -215,6 +216,10 @@ namespace GPUDDA {
 		__host__ BitArray();
 		__host__ BitArray(const BitArray& other, bool isGPU);
 		__host__ BitArray(size_t num_bits, bool isGPU);
+		// Device-side: construct a non-owning view into an already-allocated raw pointer
+		__device__ BitArray(uint32_t* rawPtr, size_t num_bits) : size(num_bits), data(rawPtr) {}
+		// Host-side: non-owning view wrapping an existing GPU pointer (used by streaming)
+		__host__ BitArray(uint32_t* rawPtr, size_t num_bits, bool /*non_owning*/) : size(num_bits), data(rawPtr) {}
 		__device__ __host__ bool operator[](size_t index) const;
 		__device__ __host__ BitRef operator[](size_t index);
 		__device__ __host__ uint32_t* Raw();
@@ -231,6 +236,25 @@ namespace GPUDDA {
 	};
 	typedef VoxelBuffer<3> VoxelBuffer3D;
 	typedef Bounds<float3> Bounds3Df;
+
+	struct BrickBounds {
+		uint8_t min_x, min_y, min_z;
+		uint8_t max_x, max_y, max_z;
+	};
+
+	// -----------------------------------------------------------------------
+	// BrickPool: contiguous GPU buffer replacing scattered VoxelBuffer3D*
+	// Each occupied low-res cell ("brick") is stored sequentially.
+	// indices[cell_idx] == UINT32_MAX  →  empty cell (skip immediately)
+	// indices[cell_idx] == k           →  brick data at data[k * brick_words]
+	// -----------------------------------------------------------------------
+	struct BrickPool {
+		uint32_t* data = nullptr;     // flat packed-bit array for all bricks
+		uint32_t* indices = nullptr;  // per-chunk offset, UINT32_MAX = empty
+		const BrickBounds* bounds = nullptr; // tight occupied-voxel bounds per pool slot
+		uint32_t  brick_words = 0;    // uint32_t words per brick = ceil(factor^3/32)
+		uint32_t  brick_dim = 0;      // = factor (brick is brick_dim^3 voxels)
+	};
 
 	constexpr size_t MAX_STEPS = 2048;
 
@@ -288,6 +312,11 @@ namespace GPUDDA {
 	__device__ bool Raytrace(int maxSteps, float3 origin, float3 ray, VoxelBuffer3D chunks, VoxelBuffer3D* chunksData, Bounds3Df* chunkBoundingBoxes, int factor,
 		int& out_steps, float3& out_normal, float3& out_hit);
 
+	// Optimised path: uses BrickPool (no pointer-chasing) + distance-field skipping
+	__device__ bool RaytraceFast(int maxSteps, float3 origin, float3 ray,
+		VoxelBuffer3D chunks, BrickPool bricks, const uint8_t* distField,
+		int factor, int& out_steps, float3& out_normal, float3& out_pos);
+
 	class VoxelRaytracer3D {
 	private:
 		VoxelRaytracer3D(const VoxelRaytracer3D&) = delete;
@@ -312,7 +341,20 @@ namespace GPUDDA {
 		GPUDDA::VoxelBuffer3D* gpu_VoxelBuffer = nullptr;
 		GPUDDA::VoxelBuffer3D* gpu_VoxelBufferDatas = nullptr;
 		Bounds3Df* gpu_VoxelBufferDataBounds = nullptr;
+		uint32_t* gpu_VoxelBufferGridData = nullptr;
+		std::vector<uint32_t*> gpu_VoxelBufferDataGridPointers{};
 		float3 dimensions{};
+
+		// BrickPool + DistanceField GPU resources
+		BrickPool gpu_BrickPool{};
+		uint32_t* gpu_BrickPoolData = nullptr;
+		uint32_t* gpu_BrickIndices = nullptr;
+		BrickBounds* gpu_BrickBounds = nullptr;
+		uint8_t*  gpu_DistField = nullptr;
+
+		// Set true when streaming manager owns all GPU voxel memory.
+		// Prevents Free() from double-freeing externally owned pointers.
+		bool uses_external_streaming_ = false;
 
 	public:
 		VoxelRaytracer3D(size_t count) {
@@ -342,6 +384,12 @@ namespace GPUDDA {
 		Bounds3Df* GetVoxelBufferDataBounds() {
 			return gpu_VoxelBufferDataBounds;
 		}
+		BrickPool GetBrickPool() const {
+			return gpu_BrickPool;
+		}
+		uint8_t* GetDistanceField() const {
+			return gpu_DistField;
+		}
 
 		int GetFactor() const {
 			return factor;
@@ -350,29 +398,93 @@ namespace GPUDDA {
 			factor = f;
 		}
 		void Free() {
-			if (gpu_VoxelBuffer != nullptr)
+			if (gpu_VoxelBufferGridData != nullptr) {
+				cudaFree(gpu_VoxelBufferGridData);
+				gpu_VoxelBufferGridData = nullptr;
+			}
+			if (gpu_VoxelBuffer != nullptr) {
 				cudaFree(gpu_VoxelBuffer);
-			if (gpu_VoxelBufferDatas != nullptr)
-				cudaFree(gpu_VoxelBufferDatas);
-			if (gpu_VoxelBufferDataBounds != nullptr)
-				cudaFree(gpu_VoxelBufferDataBounds);
+				gpu_VoxelBuffer = nullptr;
+			}
 
-			if (d_results != nullptr)
+			for (auto* ptr : gpu_VoxelBufferDataGridPointers) {
+				if (ptr != nullptr) {
+					cudaFree(ptr);
+				}
+			}
+			gpu_VoxelBufferDataGridPointers.clear();
+
+			if (gpu_VoxelBufferDatas != nullptr) {
+				cudaFree(gpu_VoxelBufferDatas);
+				gpu_VoxelBufferDatas = nullptr;
+			}
+			if (gpu_VoxelBufferDataBounds != nullptr) {
+				cudaFree(gpu_VoxelBufferDataBounds);
+				gpu_VoxelBufferDataBounds = nullptr;
+			}
+
+			// Free BrickPool + DistanceField
+			if (gpu_BrickPoolData != nullptr) {
+				cudaFree(gpu_BrickPoolData);
+				gpu_BrickPoolData = nullptr;
+				gpu_BrickPool.data = nullptr;
+			}
+			if (gpu_BrickIndices != nullptr) {
+				cudaFree(gpu_BrickIndices);
+				gpu_BrickIndices = nullptr;
+				gpu_BrickPool.indices = nullptr;
+			}
+			if (gpu_BrickBounds != nullptr && !uses_external_streaming_) {
+				cudaFree(gpu_BrickBounds);
+				gpu_BrickBounds = nullptr;
+				gpu_BrickPool.bounds = nullptr;
+			}
+			if (gpu_DistField != nullptr && !uses_external_streaming_) {
+				cudaFree(gpu_DistField);
+				gpu_DistField = nullptr;
+			}
+
+			if (d_results != nullptr) {
 				cudaFree(d_results);
-			if (d_results_normal != nullptr)
+				d_results = nullptr;
+			}
+			if (d_results_normal != nullptr) {
 				cudaFree(d_results_normal);
-			if (d_results_steps != nullptr)
+				d_results_normal = nullptr;
+			}
+			if (d_results_steps != nullptr) {
 				cudaFree(d_results_steps);
-			if (d_origins != nullptr)
+				d_results_steps = nullptr;
+			}
+			if (d_origins != nullptr) {
 				cudaFree(d_origins);
-			if (d_rays != nullptr)
+				d_origins = nullptr;
+			}
+			if (d_rays != nullptr) {
 				cudaFree(d_rays);
+				d_rays = nullptr;
+			}
 
 			resultsCPU = RayTraceResults<float3>(0); // Reset CPU results
 		}
 		void UploadVoxelBuffer(const GPUDDA::VoxelBuffer3D& buff);
 		void UploadVoxelBufferDatas(GPUDDA::VoxelBuffer3D* buff, size_t count);
 		void UploadVoxelBufferDataBounds(Bounds3Df* bounds, size_t count);
+		// New optimised upload path
+		void UploadBrickPool(const std::vector<uint32_t>& pool_data,
+		                     const std::vector<uint32_t>& indices,
+		                     uint32_t brick_words, uint32_t brick_dim);
+		void UploadDistanceField(const uint8_t* df, size_t count);
+
+		// Bind externally-owned streaming GPU resources.
+		// After this call the streaming manager owns all GPU voxel memory;
+		// VoxelRaytracer3D will not free those pointers in its destructor.
+		void BindStreamingResources(
+			uint32_t* d_pool_data, uint32_t* d_indices, BrickBounds* d_brick_bounds,
+			uint32_t  brick_words, uint32_t  brick_dim,
+			uint8_t*  d_dist_field,
+			uint32_t* d_lowres_bits,
+			uint16_t  lr_w, uint16_t lr_h, uint16_t lr_d);
 		RayTraceResults<float3> Raytrace(std::vector<float3> origin, std::vector<float3> ray);
 	};
 
@@ -515,6 +627,148 @@ namespace GPUDDA {
 		return std::make_tuple(low_res_buffer, low_res_grid_data, low_res_per_chunk_bounds);
 	}
 
-};
+	// -----------------------------------------------------------------------
+	// V2: returns BrickPool (contiguous) + Chebyshev distance field instead
+	// of scattered VoxelBuffer3D* / Bounds3Df*.
+	// Returns: (low_res_buffer, brick_pool_data, brick_indices,
+	//           brick_words, dist_field)
+	// -----------------------------------------------------------------------
+	static std::tuple<VoxelBuffer3D,
+	                  std::vector<uint32_t>,  // packed brick bit data
+	                  std::vector<uint32_t>,  // brick index table
+	                  uint32_t,               // brick_words
+	                  std::vector<uint8_t>>   // Chebyshev distance field
+	GenerateLowresVoxelBufferV2(const VoxelBuffer3D& originalData, int factor = 4)
+	{
+		const size_t lW = originalData.dimensions[0] / factor;
+		const size_t lH = originalData.dimensions[1] / factor;
+		const size_t lD = originalData.dimensions[2] / factor;
+		const size_t totalChunks = lW * lH * lD;
+		const uint32_t brick_voxels = (uint32_t)factor * factor * factor;
+		const uint32_t brick_words  = (brick_voxels + 31u) / 32u;
 
-#endif 
+		// ---- 1. Build occupancy + bricks in parallel ----
+		std::vector<bool>     occupied(totalChunks, false);
+		// temporary: per-chunk bit data (only allocated for occupied chunks)
+		std::vector<std::vector<uint32_t>> tmp_bricks(totalChunks);
+
+		const size_t hwConc = std::thread::hardware_concurrency();
+		const size_t cpt    = (totalChunks + hwConc - 1) / hwConc;
+
+		auto buildChunk = [&](size_t tid) {
+			size_t start = tid * cpt;
+			size_t end   = std::min(start + cpt, totalChunks);
+			for (size_t tI = start; tI < end; ++tI) {
+				uint32_t cx{}, cy{}, cz{};
+				GetPositionFromSampleIndex((uint32_t)tI, (uint32_t)lW, (uint32_t)lH, cx, cy, cz);
+
+				bool any = false;
+				std::vector<uint32_t> words(brick_words, 0u);
+
+				for (int dz = 0; dz < factor; ++dz) {
+					for (int dy = 0; dy < factor; ++dy) {
+						for (int dx = 0; dx < factor; ++dx) {
+							uint32_t hiIdx = GetSampleIndex(
+								dx + factor * cx,
+								dy + factor * cy,
+								dz + factor * cz,
+								originalData.dimensions[0], originalData.dimensions[1]);
+							if (originalData.grid[hiIdx]) {
+								uint32_t lo = GetSampleIndex(dx, dy, dz, factor, factor);
+								words[lo >> 5] |= (1u << (lo & 31));
+								any = true;
+							}
+						}
+					}
+				}
+				occupied[tI] = any;
+				if (any) tmp_bricks[tI] = std::move(words);
+			}
+		};
+
+		std::vector<std::thread> threads;
+		threads.reserve(hwConc);
+		for (size_t t = 0; t < hwConc; ++t) threads.emplace_back(buildChunk, t);
+		for (auto& th : threads) th.join();
+
+		// ---- 2. Pack bricks into contiguous pool ----
+		std::vector<uint32_t> brick_indices(totalChunks, UINT32_MAX);
+		std::vector<uint32_t> pool_data;
+		uint32_t nextSlot = 0;
+		for (size_t i = 0; i < totalChunks; ++i) {
+			if (occupied[i]) {
+				brick_indices[i] = nextSlot++;
+				pool_data.insert(pool_data.end(), tmp_bricks[i].begin(), tmp_bricks[i].end());
+			}
+		}
+
+		// ---- 3. Build low-res occupancy BitArray ----
+		BitArray low_res_grid(totalChunks, false);
+		for (size_t i = 0; i < totalChunks; ++i) low_res_grid[i] = occupied[i];
+
+		VoxelBuffer3D low_res_buffer;
+		low_res_buffer.grid        = low_res_grid;
+		low_res_buffer.dimensions[0] = (uint16_t)lW;
+		low_res_buffer.dimensions[1] = (uint16_t)lH;
+		low_res_buffer.dimensions[2] = (uint16_t)lD;
+
+		// ---- 4. Compute Chebyshev distance field (BFS on CPU) ----
+		// df[i] = Chebyshev distance (clamped to 255) to nearest occupied cell.
+		// 0 = occupied, 1 = adjacent, …
+		std::vector<uint8_t> dist_field(totalChunks, 255u);
+		// seed
+		for (size_t i = 0; i < totalChunks; ++i)
+			if (occupied[i]) dist_field[i] = 0;
+
+		// Multi-pass relaxation (6-connected Chebyshev via 26-connected sweep)
+		// Two forward+backward sweeps converge the Chebyshev DF.
+		auto getDF = [&](int x, int y, int z) -> uint8_t {
+			if (x < 0 || y < 0 || z < 0 || (size_t)x >= lW || (size_t)y >= lH || (size_t)z >= lD)
+				return 255;
+			return dist_field[GetSampleIndex(x, y, z, (uint32_t)lW, (uint32_t)lH)];
+		};
+
+		// 3 forward + 3 backward sweep passes
+		for (int pass = 0; pass < 3; ++pass) {
+			// forward
+			for (int z = 0; z < (int)lD; ++z)
+			for (int y = 0; y < (int)lH; ++y)
+			for (int x = 0; x < (int)lW; ++x) {
+				size_t idx = GetSampleIndex(x, y, z, (uint32_t)lW, (uint32_t)lH);
+				if (dist_field[idx] == 0) continue;
+				uint8_t best = 255;
+				for (int dz = -1; dz <= 1; ++dz)
+				for (int dy = -1; dy <= 1; ++dy)
+				for (int dx = -1; dx <= 1; ++dx) {
+					if (!dx && !dy && !dz) continue;
+					uint8_t n = getDF(x+dx, y+dy, z+dz);
+					if (n != 255) best = std::min(best, (uint8_t)(n + 1));
+				}
+				dist_field[idx] = std::min(dist_field[idx], best);
+			}
+			// backward
+			for (int z = (int)lD-1; z >= 0; --z)
+			for (int y = (int)lH-1; y >= 0; --y)
+			for (int x = (int)lW-1; x >= 0; --x) {
+				size_t idx = GetSampleIndex(x, y, z, (uint32_t)lW, (uint32_t)lH);
+				if (dist_field[idx] == 0) continue;
+				uint8_t best = 255;
+				for (int dz = -1; dz <= 1; ++dz)
+				for (int dy = -1; dy <= 1; ++dy)
+				for (int dx = -1; dx <= 1; ++dx) {
+					if (!dx && !dy && !dz) continue;
+					uint8_t n = getDF(x+dx, y+dy, z+dz);
+					if (n != 255) best = std::min(best, (uint8_t)(n + 1));
+				}
+				dist_field[idx] = std::min(dist_field[idx], best);
+			}
+		}
+
+		return std::make_tuple(low_res_buffer, std::move(pool_data),
+		                       std::move(brick_indices), brick_words,
+		                       std::move(dist_field));
+	}
+
+}; // namespace GPUDDA
+
+#endif
