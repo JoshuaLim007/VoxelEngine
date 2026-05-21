@@ -678,6 +678,57 @@ void VoxelRaytracer3D::UploadDistanceField(const uint8_t* df, size_t count)
 }
 
 // ---------------------------------------------------------------------------
+// BindStreamingResources
+// Hands external streaming GPU pointers to the raytracer.  The manager owns
+// all GPU voxel memory; VoxelRaytracer3D will not free those pointers.
+// ---------------------------------------------------------------------------
+void VoxelRaytracer3D::BindStreamingResources(
+    uint32_t* d_pool_data, uint32_t* d_indices,
+    uint32_t  brick_words, uint32_t  brick_dim,
+    uint8_t*  d_dist_field,
+    uint32_t* d_lowres_bits,
+    uint16_t  lr_w, uint16_t lr_h, uint16_t lr_d)
+{
+    uses_external_streaming_ = true;
+
+    // Free any previously self-owned voxel data (first call: none allocated)
+    if (gpu_BrickPoolData) { cudaFree(gpu_BrickPoolData); gpu_BrickPoolData = nullptr; }
+    if (gpu_BrickIndices)  { cudaFree(gpu_BrickIndices);  gpu_BrickIndices  = nullptr; }
+    // gpu_DistField: guarded in Free() with uses_external_streaming_ flag
+
+    if (gpu_VoxelBufferGridData) { cudaFree(gpu_VoxelBufferGridData); gpu_VoxelBufferGridData = nullptr; }
+    if (gpu_VoxelBuffer)         { cudaFree(gpu_VoxelBuffer);         gpu_VoxelBuffer         = nullptr; }
+
+    // --- Bind BrickPool (external; BrickPoolData/Indices tracked as null → Free() skips) ---
+    gpu_BrickPool.data        = d_pool_data;
+    gpu_BrickPool.indices     = d_indices;
+    gpu_BrickPool.brick_words = brick_words;
+    gpu_BrickPool.brick_dim   = brick_dim;
+    gpu_DistField             = d_dist_field;
+
+    // --- Build a device-side VoxelBuffer3D pointing to the external lowres bits ---
+    // gpu_VoxelBufferGridData stays null so Free() never tries to free d_lowres_bits.
+    VoxelBuffer3D temp;
+    const size_t lr_total = static_cast<size_t>(lr_w) * lr_h * lr_d;
+    temp.grid           = BitArray(d_lowres_bits, lr_total, /*non_owning=*/false);
+    temp.dimensions[0]  = lr_w;
+    temp.dimensions[1]  = lr_h;
+    temp.dimensions[2]  = lr_d;
+
+    cudaMalloc(reinterpret_cast<void**>(&gpu_VoxelBuffer), sizeof(VoxelBuffer3D));
+    cudaMemcpy(gpu_VoxelBuffer, &temp, sizeof(VoxelBuffer3D), cudaMemcpyHostToDevice);
+    // gpu_VoxelBufferGridData = nullptr → Free() will free gpu_VoxelBuffer struct but
+    // NOT d_lowres_bits (because the struct's grid.data is an external pointer and
+    // we never store it separately).
+
+    factor     = static_cast<int>(brick_dim);
+    dimensions = make_float3(
+        static_cast<float>(lr_w),
+        static_cast<float>(lr_h),
+        static_cast<float>(lr_d));
+}
+
+// ---------------------------------------------------------------------------
 // RaytraceFast: two-level DDA with brick-pool lookup + distance-field skipping
 // ---------------------------------------------------------------------------
 __device__ bool RaytraceFast(int maxSteps, float3 origin, float3 ray,

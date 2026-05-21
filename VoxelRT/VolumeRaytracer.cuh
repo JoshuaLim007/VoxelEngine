@@ -218,6 +218,8 @@ namespace GPUDDA {
 		__host__ BitArray(size_t num_bits, bool isGPU);
 		// Device-side: construct a non-owning view into an already-allocated raw pointer
 		__device__ BitArray(uint32_t* rawPtr, size_t num_bits) : size(num_bits), data(rawPtr) {}
+		// Host-side: non-owning view wrapping an existing GPU pointer (used by streaming)
+		__host__ BitArray(uint32_t* rawPtr, size_t num_bits, bool /*non_owning*/) : size(num_bits), data(rawPtr) {}
 		__device__ __host__ bool operator[](size_t index) const;
 		__device__ __host__ BitRef operator[](size_t index);
 		__device__ __host__ uint32_t* Raw();
@@ -343,6 +345,10 @@ namespace GPUDDA {
 		uint32_t* gpu_BrickIndices = nullptr;
 		uint8_t*  gpu_DistField = nullptr;
 
+		// Set true when streaming manager owns all GPU voxel memory.
+		// Prevents Free() from double-freeing externally owned pointers.
+		bool uses_external_streaming_ = false;
+
 	public:
 		VoxelRaytracer3D(size_t count) {
 			resultsCPU = RayTraceResults<float3>(count);
@@ -421,7 +427,7 @@ namespace GPUDDA {
 				gpu_BrickIndices = nullptr;
 				gpu_BrickPool.indices = nullptr;
 			}
-			if (gpu_DistField != nullptr) {
+			if (gpu_DistField != nullptr && !uses_external_streaming_) {
 				cudaFree(gpu_DistField);
 				gpu_DistField = nullptr;
 			}
@@ -457,6 +463,16 @@ namespace GPUDDA {
 		                     const std::vector<uint32_t>& indices,
 		                     uint32_t brick_words, uint32_t brick_dim);
 		void UploadDistanceField(const uint8_t* df, size_t count);
+
+		// Bind externally-owned streaming GPU resources.
+		// After this call the streaming manager owns all GPU voxel memory;
+		// VoxelRaytracer3D will not free those pointers in its destructor.
+		void BindStreamingResources(
+			uint32_t* d_pool_data, uint32_t* d_indices,
+			uint32_t  brick_words, uint32_t  brick_dim,
+			uint8_t*  d_dist_field,
+			uint32_t* d_lowres_bits,
+			uint16_t  lr_w, uint16_t lr_h, uint16_t lr_d);
 		RayTraceResults<float3> Raytrace(std::vector<float3> origin, std::vector<float3> ray);
 	};
 

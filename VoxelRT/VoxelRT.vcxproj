@@ -11,12 +11,14 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <CudaCompile Include="ChunkStreamingManager.cu" />
     <CudaCompile Include="cuda_noise.cu" />
     <CudaCompile Include="VolumeRaytracer.cu" />
     <CudaCompile Include="Renderer.cu" />
     <CudaCompile Include="VoxelWorldBuilder.cu" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="ChunkStreamingManager.cuh" />
     <ClInclude Include="cuda_noise.cuh" />
     <ClInclude Include="VolumeRaytracer.cuh" />
     <ClInclude Include="helper_math.h" />
