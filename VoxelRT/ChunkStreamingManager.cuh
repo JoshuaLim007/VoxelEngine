@@ -52,9 +52,9 @@ namespace GPUDDA {
 // ============================================================
 // World / chunk dimension constants
 // ============================================================
-constexpr uint32_t STREAM_WORLD_VOXEL_X  = 4096;
-constexpr uint32_t STREAM_WORLD_VOXEL_Y  = 512;
-constexpr uint32_t STREAM_WORLD_VOXEL_Z  = 4096;
+constexpr uint32_t STREAM_WORLD_VOXEL_X  = 4096 * 2;
+constexpr uint32_t STREAM_WORLD_VOXEL_Y  = 512 * 2;
+constexpr uint32_t STREAM_WORLD_VOXEL_Z  = 4096 * 2;
 
 // brick_dim must match the factor used in the renderer (32)
 constexpr uint32_t STREAM_BRICK_DIM      = 32;
@@ -85,16 +85,16 @@ constexpr uint32_t MAX_POOL_BRICKS       =
 
 // Camera-relative render distance in world voxels.
 // Scheduling/filtering is done in super-chunk coordinates derived from this.
-constexpr float    STREAM_LOAD_RADIUS      = 1024.0f;
+constexpr float    STREAM_LOAD_RADIUS      = 1024.0f * 2;
 constexpr int      STREAM_RENDER_RADIUS_SC =
     static_cast<int>(STREAM_LOAD_RADIUS / static_cast<float>(SC_VOXEL_DIM));
 
 // Maximum count of in-flight chunk build requests (queued + currently building).
-constexpr uint32_t MAX_QUEUED_CHUNKS     = 256;
+constexpr uint32_t MAX_QUEUED_CHUNKS     = 128;
 
 // Background worker threads for chunk generation.
 // Uses hardware_concurrency - 1 (capped), or at least 1.
-constexpr uint32_t MAX_WORKER_THREADS    = 8;
+constexpr uint32_t MAX_WORKER_THREADS    = 4;
 
 // ============================================================
 // Structs
@@ -126,6 +126,7 @@ struct ChunkBuildResult {
     std::vector<uint32_t> brick_data;        // occupied_count * brick_words uint32_ts
     std::vector<uint32_t> local_brick_seq;   // BRICKS_PER_SC entries
     uint32_t              occupied_count = 0;
+    bool                  canceled = false;
 };
 
 // Priority policy interface. Higher score means higher scheduling priority.
@@ -184,6 +185,8 @@ private:
     void EvictChunk(const ChunkKey& key);
     void UploadGPUState();
     bool IsWithinRenderDistance(const ChunkKey& key, const ChunkKey& cam_sc) const;
+    bool IsBuildCancelled(const ChunkKey& key);
+    void RequestBuildCancel(const ChunkKey& key);
 
     // ---- Distance field (rebuilt off the main thread) ----
     // When occupancy changes, IntegrateResult/EvictChunk sets df_rebuild_requested_
@@ -251,6 +254,11 @@ private:
     // ---- In-flight set (chunks being built; protected by in_flight_mutex_) ----
     std::unordered_set<ChunkKey, ChunkKeyHash> in_flight_;
     std::mutex in_flight_mutex_;
+
+    // ---- Active build tracking + cancellation (worker + main thread) ----
+    std::unordered_set<ChunkKey, ChunkKeyHash> building_;
+    std::unordered_set<ChunkKey, ChunkKeyHash> cancel_requested_;
+    std::mutex                                  build_state_mutex_;
 
     // ---- Worker thread pool ----
     std::vector<std::thread> workers_;

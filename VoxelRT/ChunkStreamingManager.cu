@@ -241,6 +241,25 @@ void ChunkStreamingManager::UpdateCamera(float3 cam_pos, float3 cam_fwd) {
         cam_sc_snapshot_ = cam_sc;
     }
 
+    // Re-score queued (not currently building) requests so nearer/higher-score
+    // chunks can move ahead as the camera changes.
+    {
+        std::lock_guard<std::mutex> lk(build_queue_mutex_);
+        if (!build_queue_.empty()) {
+            std::vector<BuildRequest> pending;
+            pending.reserve(build_queue_.size());
+            while (!build_queue_.empty()) {
+                auto req = build_queue_.top();
+                build_queue_.pop();
+                req.priority = ChunkPriority(cam_sc, req.key);
+                pending.push_back(req);
+            }
+            for (const auto& req : pending) {
+                build_queue_.push(req);
+            }
+        }
+    }
+
     // Evict loaded chunks that are now outside render distance.
     // This is the only steady-state eviction policy.
     {
@@ -291,6 +310,60 @@ void ChunkStreamingManager::UpdateCamera(float3 cam_pos, float3 cam_fwd) {
                   [](const BuildRequest& a, const BuildRequest& b) {
                       return a.priority > b.priority;
                   });
+
+        // Preempt currently building chunks when they are lower priority than
+        // top candidates that are not yet in-flight.
+        {
+            std::vector<ChunkKey> current_building;
+            {
+                std::lock_guard<std::mutex> lk(build_state_mutex_);
+                current_building.reserve(building_.size());
+                for (const auto& key : building_) current_building.push_back(key);
+            }
+
+            if (!current_building.empty()) {
+                std::vector<float> build_scores;
+                build_scores.reserve(current_building.size());
+                for (const auto& key : current_building) {
+                    build_scores.push_back(ChunkPriority(cam_sc, key));
+                }
+                std::sort(build_scores.begin(), build_scores.end());
+
+                size_t target_idx = 0;
+                for (const auto& cand : candidates) {
+                    if (target_idx >= build_scores.size()) break;
+
+                    bool already_in_flight = false;
+                    {
+                        std::lock_guard<std::mutex> lk(in_flight_mutex_);
+                        already_in_flight = in_flight_.count(cand.key) != 0;
+                    }
+                    if (already_in_flight) continue;
+
+                    const float weakest_building = build_scores[target_idx];
+                    if (cand.priority > weakest_building) {
+                        // Cancel one currently building chunk that is at or below
+                        // the weakest score bucket.
+                        ChunkKey to_cancel{};
+                        bool found = false;
+                        {
+                            std::lock_guard<std::mutex> lk(build_state_mutex_);
+                            for (const auto& bk : building_) {
+                                if (ChunkPriority(cam_sc, bk) <= weakest_building) {
+                                    to_cancel = bk;
+                                    found = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (found) {
+                            RequestBuildCancel(to_cancel);
+                            ++target_idx;
+                        }
+                    }
+                }
+            }
+        }
 
         std::vector<BuildRequest> to_enqueue;
         {
@@ -388,7 +461,19 @@ void ChunkStreamingManager::WorkerThread() {
             build_queue_.pop();
         }
 
+        {
+            std::lock_guard<std::mutex> lk(build_state_mutex_);
+            building_.insert(key);
+            cancel_requested_.erase(key);
+        }
+
         ChunkBuildResult result = BuildChunk(key);
+
+        {
+            std::lock_guard<std::mutex> lk(build_state_mutex_);
+            building_.erase(key);
+            cancel_requested_.erase(key);
+        }
 
         {
             std::lock_guard<std::mutex> lk(upload_queue_mutex_);
@@ -414,6 +499,11 @@ ChunkBuildResult ChunkStreamingManager::BuildChunk(const ChunkKey& key) {
     result.key = key;
     result.local_brick_seq.assign(BRICKS_PER_SC, UINT32_MAX);
 
+    if (IsBuildCancelled(key)) {
+        result.canceled = true;
+        return result;
+    }
+
     // World-space voxel origin of this super-chunk
     const uint32_t wx0 = key.x * SC_VOXEL_DIM;
     const uint32_t wy0 = key.y * SC_VOXEL_DIM;
@@ -426,6 +516,10 @@ ChunkBuildResult ChunkStreamingManager::BuildChunk(const ChunkKey& key) {
     heights.resize(hmap_size);
 
     for (uint32_t lz = 0; lz < SC_VOXEL_DIM; ++lz) {
+        if (IsBuildCancelled(key)) {
+            result.canceled = true;
+            return result;
+        }
         for (uint32_t lx = 0; lx < SC_VOXEL_DIM; ++lx) {
             const float wx = (wx0 + lx) * 0.001f;
             const float wz = (wz0 + lz) * 0.001f;
@@ -442,6 +536,10 @@ ChunkBuildResult ChunkStreamingManager::BuildChunk(const ChunkKey& key) {
     brick_buf.resize(brick_words_);
 
     for (uint32_t lbz = 0; lbz < SC_BRICK_DIM; ++lbz) {
+        if (IsBuildCancelled(key)) {
+            result.canceled = true;
+            return result;
+        }
         for (uint32_t lby = 0; lby < SC_BRICK_DIM; ++lby) {
             for (uint32_t lbx = 0; lbx < SC_BRICK_DIM; ++lbx) {
                 const uint32_t local_brick_idx =
@@ -489,10 +587,24 @@ ChunkBuildResult ChunkStreamingManager::BuildChunk(const ChunkKey& key) {
     return result;
 }
 
+bool ChunkStreamingManager::IsBuildCancelled(const ChunkKey& key) {
+    std::lock_guard<std::mutex> lk(build_state_mutex_);
+    return cancel_requested_.count(key) != 0;
+}
+
+void ChunkStreamingManager::RequestBuildCancel(const ChunkKey& key) {
+    std::lock_guard<std::mutex> lk(build_state_mutex_);
+    if (building_.count(key)) {
+        cancel_requested_.insert(key);
+    }
+}
+
 // ============================================================
 // Internal: integrate a completed SC into CPU shadow state
 // ============================================================
 void ChunkStreamingManager::IntegrateResult(const ChunkBuildResult& result) {
+    if (result.canceled) return;
+
     // Discard if already loaded (duplicate delivery from in-flight requeue)
     if (loaded_.count(result.key)) return;
 
