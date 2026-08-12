@@ -36,6 +36,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <list>
+#include <memory>
 #include <mutex>
 #include <queue>
 #include <thread>
@@ -77,22 +78,23 @@ constexpr uint32_t LR_TOTAL              = LR_DIM_X * LR_DIM_Y * LR_DIM_Z;      
 constexpr uint32_t BRICKS_PER_SC        = SC_BRICK_DIM * SC_BRICK_DIM * SC_BRICK_DIM; // 512
 
 // GPU pool: pre-allocated brick slots.
-// At 4 KB per brick (32^3/32 uint32_t), 32768 * 4 KB = 128 MB.
-// Adjust down if VRAM is limited.
-constexpr uint32_t MAX_POOL_BRICKS       = 32768;
+// Sized to the world upper bound so pool exhaustion cannot happen under
+// the current streaming policy (ignoring memory pressure by design).
+constexpr uint32_t MAX_POOL_BRICKS       =
+    WORLD_SC_X * WORLD_SC_Y * WORLD_SC_Z * BRICKS_PER_SC;
 
-// Maximum completed SCs to integrate per FlushUploads() call.
-// Limits per-frame stall when many chunks arrive at once.
-constexpr int      MAX_UPLOADS_PER_FRAME = 4;
+// Camera-relative render distance in world voxels.
+// Scheduling/filtering is done in super-chunk coordinates derived from this.
+constexpr float    STREAM_LOAD_RADIUS      = 1024.0f;
+constexpr int      STREAM_RENDER_RADIUS_SC =
+    static_cast<int>(STREAM_LOAD_RADIUS / static_cast<float>(SC_VOXEL_DIM));
 
-// Camera-relative radii for load / eviction decisions (world voxels).
-// A slight hysteresis (EVICT > LOAD) prevents thrashing.
-constexpr float    STREAM_LOAD_RADIUS    = 1024.0f;
-constexpr float    STREAM_EVICT_RADIUS   = 1280.0f;
+// Maximum count of in-flight chunk build requests (queued + currently building).
+constexpr uint32_t MAX_QUEUED_CHUNKS     = 256;
 
 // Background worker threads for chunk generation.
 // Uses hardware_concurrency - 1 (capped), or at least 1.
-constexpr uint32_t MAX_WORKER_THREADS    = 4;
+constexpr uint32_t MAX_WORKER_THREADS    = 8;
 
 // ============================================================
 // Structs
@@ -126,6 +128,20 @@ struct ChunkBuildResult {
     uint32_t              occupied_count = 0;
 };
 
+// Priority policy interface. Higher score means higher scheduling priority.
+class IChunkScoringPolicy {
+public:
+    virtual ~IChunkScoringPolicy() = default;
+    virtual float Score(const ChunkKey& camera_sc, const ChunkKey& candidate_sc) const = 0;
+};
+
+// Current default policy: Manhattan distance in super-chunk space.
+// This is quantized to chunk coordinates (not world-space float position).
+class ManhattanChunkScoringPolicy final : public IChunkScoringPolicy {
+public:
+    float Score(const ChunkKey& camera_sc, const ChunkKey& candidate_sc) const override;
+};
+
 // ============================================================
 // ChunkStreamingManager
 // ============================================================
@@ -138,11 +154,12 @@ public:
     // brick_words = ceil(STREAM_BRICK_DIM^3 / 32).
     void Init(VoxelRaytracer3D* raytracer, uint32_t brick_words);
 
-    // Call once per frame: schedules loads and evictions based on camera state.
+    // Call once per frame: schedules loads based on camera state.
     void UpdateCamera(float3 cam_pos, float3 cam_fwd);
 
-    // Call once per frame: integrates up to MAX_UPLOADS_PER_FRAME completed
-    // chunks into the GPU pool.  Returns true if GPU data changed.
+    // Call once per frame: integrates all completed chunks into the GPU pool.
+    // Completed chunks outside render distance are dropped immediately.
+    // Returns true if GPU data changed.
     bool FlushUploads(VoxelRaytracer3D* raytracer);
 
     // Blocking helper: processes uploads in a tight loop until at least
@@ -166,6 +183,7 @@ private:
     void IntegrateResult(const ChunkBuildResult& result);
     void EvictChunk(const ChunkKey& key);
     void UploadGPUState();
+    bool IsWithinRenderDistance(const ChunkKey& key, const ChunkKey& cam_sc) const;
 
     // ---- Distance field (rebuilt off the main thread) ----
     // When occupancy changes, IntegrateResult/EvictChunk sets df_rebuild_requested_
@@ -192,7 +210,8 @@ private:
     void     FreeContig (uint32_t base, uint32_t count);
 
     // ---- Priority ----
-    float ChunkPriority(const ChunkKey& key) const;
+    float ChunkPriority(const ChunkKey& camera_sc, const ChunkKey& key) const;
+    std::unique_ptr<IChunkScoringPolicy> scoring_policy_;
 
     // ---- GPU resources (owned by this manager) ----
     uint32_t* d_pool_data_    = nullptr; // MAX_POOL_BRICKS * brick_words_ uint32_ts
@@ -251,10 +270,9 @@ private:
     std::queue<ChunkBuildResult> upload_queue_;
     std::mutex                   upload_queue_mutex_;
 
-    // ---- Camera snapshot (updated by UpdateCamera, read by workers) ----
+    // ---- Camera snapshot (updated by UpdateCamera, read by FlushUploads) ----
     mutable std::mutex cam_mutex_;
-    float3             cam_pos_snapshot_{0.f, 0.f, 0.f};
-    float3             cam_fwd_snapshot_{0.f, 0.f, 1.f};
+    ChunkKey           cam_sc_snapshot_{0u, 0u, 0u};
 };
 
 } // namespace GPUDDA

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstring>
 #include <iostream>
+#include <memory>
 #include <thread>
 
 namespace GPUDDA {
@@ -105,11 +106,22 @@ inline float repeaterPerlin(float px, float py, float pz,
 
 } // namespace CPUNoise
 
+float ManhattanChunkScoringPolicy::Score(const ChunkKey& camera_sc,
+                                         const ChunkKey& candidate_sc) const {
+    const int dx = std::abs(static_cast<int>(candidate_sc.x) - static_cast<int>(camera_sc.x));
+    const int dy = std::abs(static_cast<int>(candidate_sc.y) - static_cast<int>(camera_sc.y));
+    const int dz = std::abs(static_cast<int>(candidate_sc.z) - static_cast<int>(camera_sc.z));
+    const int manhattan = dx + dy + dz;
+    // Higher score means more urgent. Add 1 to avoid divide-by-zero at camera chunk.
+    return 1.0f / static_cast<float>(manhattan + 1);
+}
+
 // ============================================================
 // ChunkStreamingManager
 // ============================================================
 
-ChunkStreamingManager::ChunkStreamingManager() = default;
+ChunkStreamingManager::ChunkStreamingManager()
+    : scoring_policy_(std::make_unique<ManhattanChunkScoringPolicy>()) {}
 
 ChunkStreamingManager::~ChunkStreamingManager() {
     // Shut down worker threads
@@ -206,40 +218,51 @@ void ChunkStreamingManager::Init(VoxelRaytracer3D* raytracer, uint32_t brick_wor
 
 // ============================================================
 void ChunkStreamingManager::UpdateCamera(float3 cam_pos, float3 cam_fwd) {
-    // Update camera snapshot for priority scoring in worker threads
-    {
-        std::lock_guard<std::mutex> lk(cam_mutex_);
-        cam_pos_snapshot_ = cam_pos;
-        cam_fwd_snapshot_ = cam_fwd;
-    }
+    (void)cam_fwd;
 
     // Camera super-chunk position
     const int sc_cx = static_cast<int>(cam_pos.x / SC_VOXEL_DIM);
     const int sc_cy = static_cast<int>(cam_pos.y / SC_VOXEL_DIM);
     const int sc_cz = static_cast<int>(cam_pos.z / SC_VOXEL_DIM);
 
-    // Evict loaded chunks beyond evict radius
-    {
-        std::vector<ChunkKey> to_evict;
-        for (auto it = loaded_.begin(); it != loaded_.end(); ++it) {
-            const ChunkKey& key = it->first;
-            const float cx = (key.x + 0.5f) * SC_VOXEL_DIM - cam_pos.x;
-            const float cy = (key.y + 0.5f) * SC_VOXEL_DIM - cam_pos.y;
-            const float cz = (key.z + 0.5f) * SC_VOXEL_DIM - cam_pos.z;
-            if (std::sqrt(cx*cx + cy*cy + cz*cz) > STREAM_EVICT_RADIUS) {
-                to_evict.push_back(key);
-            }
-        }
-        for (const auto& k : to_evict) EvictChunk(k);
+    if (sc_cx < 0 || sc_cy < 0 || sc_cz < 0 ||
+        static_cast<uint32_t>(sc_cx) >= WORLD_SC_X ||
+        static_cast<uint32_t>(sc_cy) >= WORLD_SC_Y ||
+        static_cast<uint32_t>(sc_cz) >= WORLD_SC_Z) {
+        return;
     }
 
-    // Candidate SCs within load radius, sorted by priority
-    const int sc_radius_xz = static_cast<int>(STREAM_LOAD_RADIUS / SC_VOXEL_DIM) + 2;
+    const ChunkKey cam_sc{static_cast<uint16_t>(sc_cx),
+                          static_cast<uint16_t>(sc_cy),
+                          static_cast<uint16_t>(sc_cz)};
+
+    {
+        std::lock_guard<std::mutex> lk(cam_mutex_);
+        cam_sc_snapshot_ = cam_sc;
+    }
+
+    // Evict loaded chunks that are now outside render distance.
+    // This is the only steady-state eviction policy.
+    {
+        std::vector<ChunkKey> to_evict;
+        to_evict.reserve(loaded_.size());
+        for (const auto& kv : loaded_) {
+            if (!IsWithinRenderDistance(kv.first, cam_sc)) {
+                to_evict.push_back(kv.first);
+            }
+        }
+        for (const auto& key : to_evict) {
+            EvictChunk(key);
+        }
+    }
+
+    // Candidate SCs within render distance, sorted by policy score
+    const int sc_radius = STREAM_RENDER_RADIUS_SC;
 
     std::vector<BuildRequest> candidates;
-    for (int dz = -sc_radius_xz; dz <= sc_radius_xz; ++dz) {
-        for (int dy = -static_cast<int>(WORLD_SC_Y); dy <= static_cast<int>(WORLD_SC_Y); ++dy) {
-            for (int dx = -sc_radius_xz; dx <= sc_radius_xz; ++dx) {
+    for (int dz = -sc_radius; dz <= sc_radius; ++dz) {
+        for (int dy = -sc_radius; dy <= sc_radius; ++dy) {
+            for (int dx = -sc_radius; dx <= sc_radius; ++dx) {
                 const int sx = sc_cx + dx, sy = sc_cy + dy, sz = sc_cz + dz;
                 if (sx < 0 || sy < 0 || sz < 0) continue;
                 if (static_cast<uint32_t>(sx) >= WORLD_SC_X ||
@@ -256,44 +279,69 @@ void ChunkStreamingManager::UpdateCamera(float3 cam_pos, float3 cam_fwd) {
                     if (in_flight_.count(key)) continue;
                 }
 
-                const float cx_ = (sx + 0.5f) * SC_VOXEL_DIM - cam_pos.x;
-                const float cy_ = (sy + 0.5f) * SC_VOXEL_DIM - cam_pos.y;
-                const float cz_ = (sz + 0.5f) * SC_VOXEL_DIM - cam_pos.z;
-                if (std::sqrt(cx_*cx_ + cy_*cy_ + cz_*cz_) > STREAM_LOAD_RADIUS) continue;
+                if (!IsWithinRenderDistance(key, cam_sc)) continue;
 
-                candidates.push_back({key, ChunkPriority(key)});
+                candidates.push_back({key, ChunkPriority(cam_sc, key)});
             }
         }
     }
 
     if (!candidates.empty()) {
-        std::lock_guard<std::mutex> lk(build_queue_mutex_);
-        for (auto& req : candidates) {
-            {
-                std::lock_guard<std::mutex> lk2(in_flight_mutex_);
-                in_flight_.insert(req.key);
+        std::sort(candidates.begin(), candidates.end(),
+                  [](const BuildRequest& a, const BuildRequest& b) {
+                      return a.priority > b.priority;
+                  });
+
+        std::vector<BuildRequest> to_enqueue;
+        {
+            std::lock_guard<std::mutex> lk(in_flight_mutex_);
+            const size_t in_flight_count = in_flight_.size();
+            if (in_flight_count < MAX_QUEUED_CHUNKS) {
+                const size_t capacity = static_cast<size_t>(MAX_QUEUED_CHUNKS) - in_flight_count;
+                const size_t take = std::min(capacity, candidates.size());
+                to_enqueue.reserve(take);
+                for (size_t i = 0; i < take; ++i) {
+                    in_flight_.insert(candidates[i].key);
+                    to_enqueue.push_back(candidates[i]);
+                }
             }
-            build_queue_.push(req);
         }
-        build_queue_cv_.notify_all();
+
+        if (!to_enqueue.empty()) {
+            std::lock_guard<std::mutex> lk(build_queue_mutex_);
+            for (const auto& req : to_enqueue) {
+                build_queue_.push(req);
+            }
+            build_queue_cv_.notify_all();
+        }
     }
 }
 
 // ============================================================
 bool ChunkStreamingManager::FlushUploads(VoxelRaytracer3D* /*raytracer*/) {
-    // Drain up to MAX_UPLOADS_PER_FRAME from the upload queue
+    // Drain all completed chunk builds from the upload queue.
+    // Completed chunks that are now out of render distance are dropped.
     std::vector<ChunkBuildResult> results;
     {
         std::lock_guard<std::mutex> lk(upload_queue_mutex_);
-        int n = 0;
-        while (!upload_queue_.empty() && n < MAX_UPLOADS_PER_FRAME) {
+        while (!upload_queue_.empty()) {
             results.push_back(std::move(upload_queue_.front()));
             upload_queue_.pop();
-            ++n;
         }
     }
 
-    for (auto& r : results) IntegrateResult(r);
+    ChunkKey cam_sc;
+    {
+        std::lock_guard<std::mutex> lk(cam_mutex_);
+        cam_sc = cam_sc_snapshot_;
+    }
+
+    for (auto& r : results) {
+        if (!IsWithinRenderDistance(r.key, cam_sc)) {
+            continue;
+        }
+        IntegrateResult(r);
+    }
 
     // Upload if chunks changed this frame OR a background DF rebuild finished
     bool df_ready = false;
@@ -314,8 +362,8 @@ bool ChunkStreamingManager::FlushUploads(VoxelRaytracer3D* /*raytracer*/) {
 void ChunkStreamingManager::WaitForInitialChunks(VoxelRaytracer3D* raytracer,
                                                   float3 cam_pos, int min_chunks) {
     std::cout << "[Streaming] Waiting for " << min_chunks << " initial chunks...\n";
-    UpdateCamera(cam_pos, {0.f, 0.f, 1.f});
     while (static_cast<int>(loaded_.size()) < min_chunks) {
+        UpdateCamera(cam_pos, {0.f, 0.f, 1.f});
         FlushUploads(raytracer);
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
@@ -454,9 +502,8 @@ void ChunkStreamingManager::IntegrateResult(const ChunkBuildResult& result) {
     if (occupied > 0) {
         base_slot = AllocContig(occupied);
         if (base_slot == UINT32_MAX) {
-            // Pool exhausted; re-queue will happen next UpdateCamera
-            std::cerr << "[Streaming] Pool full, dropping SC ("
-                      << result.key.x << ',' << result.key.y << ',' << result.key.z << ")\n";
+            // Should be unreachable with MAX_POOL_BRICKS sized to world upper bound.
+            // Keep this as a fail-safe to avoid writing invalid GPU addresses.
             return;
         }
 
@@ -704,27 +751,18 @@ void ChunkStreamingManager::BuildDFFromSnapshot(
 // Higher priority = more urgent to build.
 // Forward-facing chunks score higher; closer chunks score higher.
 // ============================================================
-float ChunkStreamingManager::ChunkPriority(const ChunkKey& key) const {
-    float3 cam_pos, cam_fwd;
-    {
-        std::lock_guard<std::mutex> lk(cam_mutex_);
-        cam_pos = cam_pos_snapshot_;
-        cam_fwd = cam_fwd_snapshot_;
-    }
-    const float dx = (key.x + 0.5f) * SC_VOXEL_DIM - cam_pos.x;
-    const float dy = (key.y + 0.5f) * SC_VOXEL_DIM - cam_pos.y;
-    const float dz = (key.z + 0.5f) * SC_VOXEL_DIM - cam_pos.z;
-    const float dist  = std::sqrt(dx*dx + dy*dy + dz*dz) + 1.f;
-    const float len   = dist - 1.f;
-    // View alignment in [0,1]; forward=1, behind=0
-    float align = 0.5f;
-    if (len > 0.001f) {
-        align = (dx*cam_fwd.x + dy*cam_fwd.y + dz*cam_fwd.z) / len;
-        align = (align + 1.f) * 0.5f; // remap [-1,1] → [0,1]
-    }
-    // Blend: chunks directly ahead and close get highest priority
-    // weight_view=2 means forward-facing counts twice as much as distance
-    return (align * 2.f + 0.5f) / dist;
+float ChunkStreamingManager::ChunkPriority(const ChunkKey& camera_sc, const ChunkKey& key) const {
+    if (!scoring_policy_) return 0.0f;
+    return scoring_policy_->Score(camera_sc, key);
+}
+
+bool ChunkStreamingManager::IsWithinRenderDistance(const ChunkKey& key, const ChunkKey& cam_sc) const {
+    const int dx = std::abs(static_cast<int>(key.x) - static_cast<int>(cam_sc.x));
+    const int dz = std::abs(static_cast<int>(key.z) - static_cast<int>(cam_sc.z));
+    // Cylindrical inclusion in chunk space: radius is applied in XZ only.
+    const int dist2 = dx * dx + dz * dz;
+    const int radius2 = STREAM_RENDER_RADIUS_SC * STREAM_RENDER_RADIUS_SC;
+    return dist2 <= radius2;
 }
 
 // ============================================================
