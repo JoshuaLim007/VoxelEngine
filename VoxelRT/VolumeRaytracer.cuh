@@ -237,6 +237,11 @@ namespace GPUDDA {
 	typedef VoxelBuffer<3> VoxelBuffer3D;
 	typedef Bounds<float3> Bounds3Df;
 
+	struct BrickBounds {
+		uint8_t min_x, min_y, min_z;
+		uint8_t max_x, max_y, max_z;
+	};
+
 	// -----------------------------------------------------------------------
 	// BrickPool: contiguous GPU buffer replacing scattered VoxelBuffer3D*
 	// Each occupied low-res cell ("brick") is stored sequentially.
@@ -246,6 +251,7 @@ namespace GPUDDA {
 	struct BrickPool {
 		uint32_t* data = nullptr;     // flat packed-bit array for all bricks
 		uint32_t* indices = nullptr;  // per-chunk offset, UINT32_MAX = empty
+		const BrickBounds* bounds = nullptr; // tight occupied-voxel bounds per pool slot
 		uint32_t  brick_words = 0;    // uint32_t words per brick = ceil(factor^3/32)
 		uint32_t  brick_dim = 0;      // = factor (brick is brick_dim^3 voxels)
 	};
@@ -343,6 +349,7 @@ namespace GPUDDA {
 		BrickPool gpu_BrickPool{};
 		uint32_t* gpu_BrickPoolData = nullptr;
 		uint32_t* gpu_BrickIndices = nullptr;
+		BrickBounds* gpu_BrickBounds = nullptr;
 		uint8_t*  gpu_DistField = nullptr;
 
 		// Set true when streaming manager owns all GPU voxel memory.
@@ -427,6 +434,11 @@ namespace GPUDDA {
 				gpu_BrickIndices = nullptr;
 				gpu_BrickPool.indices = nullptr;
 			}
+			if (gpu_BrickBounds != nullptr && !uses_external_streaming_) {
+				cudaFree(gpu_BrickBounds);
+				gpu_BrickBounds = nullptr;
+				gpu_BrickPool.bounds = nullptr;
+			}
 			if (gpu_DistField != nullptr && !uses_external_streaming_) {
 				cudaFree(gpu_DistField);
 				gpu_DistField = nullptr;
@@ -468,7 +480,7 @@ namespace GPUDDA {
 		// After this call the streaming manager owns all GPU voxel memory;
 		// VoxelRaytracer3D will not free those pointers in its destructor.
 		void BindStreamingResources(
-			uint32_t* d_pool_data, uint32_t* d_indices,
+			uint32_t* d_pool_data, uint32_t* d_indices, BrickBounds* d_brick_bounds,
 			uint32_t  brick_words, uint32_t  brick_dim,
 			uint8_t*  d_dist_field,
 			uint32_t* d_lowres_bits,

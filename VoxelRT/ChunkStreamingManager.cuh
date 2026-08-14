@@ -22,6 +22,7 @@
 // ---------------------------------------------------
 //  d_pool_data_    : flat packed-bit array, MAX_POOL_BRICKS slots
 //  d_brick_indices_: per-brick slot (UINT32_MAX = not loaded)
+//  d_brick_bounds_ : tight occupied-voxel bounds for each pool slot
 //  d_dist_field_   : Chebyshev distance for empty-space skip
 //  d_lowres_bits_  : packed-bit occupancy for the low-res DDA grid
 //
@@ -124,6 +125,7 @@ struct ChunkKeyHash {
 struct ChunkBuildResult {
     ChunkKey              key;
     std::vector<uint32_t> brick_data;        // occupied_count * brick_words uint32_ts
+    std::vector<BrickBounds> brick_bounds;   // occupied_count, matches brick_data order
     std::vector<uint32_t> local_brick_seq;   // BRICKS_PER_SC entries
     uint32_t              occupied_count = 0;
     bool                  canceled = false;
@@ -171,6 +173,7 @@ public:
     // GPU resource accessors (pointers remain valid for lifetime of manager)
     uint32_t* GetGPUBrickData()    const { return d_pool_data_;    }
     uint32_t* GetGPUBrickIndices() const { return d_brick_indices_; }
+    BrickBounds* GetGPUBrickBounds() const { return d_brick_bounds_; }
     uint8_t*  GetGPUDistField()    const { return d_dist_field_;    }
     uint32_t* GetGPULowResBits()   const { return d_lowres_bits_;   }
     uint32_t  BrickWords()         const { return brick_words_;      }
@@ -219,6 +222,7 @@ private:
     // ---- GPU resources (owned by this manager) ----
     uint32_t* d_pool_data_    = nullptr; // MAX_POOL_BRICKS * brick_words_ uint32_ts
     uint32_t* d_brick_indices_= nullptr; // LR_TOTAL uint32_ts
+    BrickBounds* d_brick_bounds_ = nullptr; // MAX_POOL_BRICKS entries
     uint8_t*  d_dist_field_   = nullptr; // LR_TOTAL uint8_ts
     uint32_t* d_lowres_bits_  = nullptr; // (LR_TOTAL + 31)/32 uint32_ts
 

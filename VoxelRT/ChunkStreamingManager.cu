@@ -140,6 +140,7 @@ ChunkStreamingManager::~ChunkStreamingManager() {
     // Free GPU resources
     if (d_pool_data_)     { cudaFree(d_pool_data_);     d_pool_data_     = nullptr; }
     if (d_brick_indices_) { cudaFree(d_brick_indices_); d_brick_indices_ = nullptr; }
+    if (d_brick_bounds_)  { cudaFree(d_brick_bounds_);  d_brick_bounds_  = nullptr; }
     if (d_dist_field_)    { cudaFree(d_dist_field_);    d_dist_field_    = nullptr; }
     if (d_lowres_bits_)   { cudaFree(d_lowres_bits_);   d_lowres_bits_   = nullptr; }
 
@@ -155,12 +156,14 @@ void ChunkStreamingManager::Init(VoxelRaytracer3D* raytracer, uint32_t brick_wor
 
     const size_t pool_bytes    = static_cast<size_t>(MAX_POOL_BRICKS) * brick_words * sizeof(uint32_t);
     const size_t indices_bytes = LR_TOTAL * sizeof(uint32_t);
+    const size_t bounds_bytes  = static_cast<size_t>(MAX_POOL_BRICKS) * sizeof(BrickBounds);
     const size_t df_bytes      = LR_TOTAL * sizeof(uint8_t);
     const size_t lr_words      = (LR_TOTAL + 31u) / 32u;
     const size_t lr_bits_bytes = lr_words * sizeof(uint32_t);
 
     cudaMalloc(reinterpret_cast<void**>(&d_pool_data_),     pool_bytes);
     cudaMalloc(reinterpret_cast<void**>(&d_brick_indices_), indices_bytes);
+    cudaMalloc(reinterpret_cast<void**>(&d_brick_bounds_),  bounds_bytes);
     cudaMalloc(reinterpret_cast<void**>(&d_dist_field_),    df_bytes);
     cudaMalloc(reinterpret_cast<void**>(&d_lowres_bits_),   lr_bits_bytes);
 
@@ -193,7 +196,7 @@ void ChunkStreamingManager::Init(VoxelRaytracer3D* raytracer, uint32_t brick_wor
 
     // Bind GPU resources to the raytracer (single binding, pointers never change)
     raytracer->BindStreamingResources(
-        d_pool_data_, d_brick_indices_, brick_words, STREAM_BRICK_DIM,
+        d_pool_data_, d_brick_indices_, d_brick_bounds_, brick_words, STREAM_BRICK_DIM,
         d_dist_field_,
         d_lowres_bits_,
         static_cast<uint16_t>(LR_DIM_X),
@@ -552,6 +555,7 @@ ChunkBuildResult ChunkStreamingManager::BuildChunk(const ChunkKey& key) {
 
                 std::fill(brick_buf.begin(), brick_buf.end(), 0u);
                 bool any = false;
+                BrickBounds bounds{STREAM_BRICK_DIM, STREAM_BRICK_DIM, STREAM_BRICK_DIM, 0u, 0u, 0u};
 
                 for (uint32_t dvz = 0; dvz < STREAM_BRICK_DIM; ++dvz) {
                     for (uint32_t dvy = 0; dvy < STREAM_BRICK_DIM; ++dvy) {
@@ -568,6 +572,12 @@ ChunkBuildResult ChunkStreamingManager::BuildChunk(const ChunkKey& key) {
                                     STREAM_BRICK_DIM, STREAM_BRICK_DIM);
                                 brick_buf[lo >> 5] |= 1u << (lo & 31);
                                 any = true;
+                                bounds.min_x = std::min(bounds.min_x, static_cast<uint8_t>(dvx));
+                                bounds.min_y = std::min(bounds.min_y, static_cast<uint8_t>(dvy));
+                                bounds.min_z = std::min(bounds.min_z, static_cast<uint8_t>(dvz));
+                                bounds.max_x = std::max(bounds.max_x, static_cast<uint8_t>(dvx));
+                                bounds.max_y = std::max(bounds.max_y, static_cast<uint8_t>(dvy));
+                                bounds.max_z = std::max(bounds.max_z, static_cast<uint8_t>(dvz));
                             }
                         }
                     }
@@ -578,6 +588,7 @@ ChunkBuildResult ChunkStreamingManager::BuildChunk(const ChunkKey& key) {
                     result.brick_data.insert(
                         result.brick_data.end(),
                         brick_buf.begin(), brick_buf.end());
+                    result.brick_bounds.push_back(bounds);
                 }
             }
         }
@@ -624,6 +635,11 @@ void ChunkStreamingManager::IntegrateResult(const ChunkBuildResult& result) {
             d_pool_data_ + static_cast<size_t>(base_slot) * brick_words_,
             result.brick_data.data(),
             result.brick_data.size() * sizeof(uint32_t),
+            cudaMemcpyHostToDevice);
+        cudaMemcpy(
+            d_brick_bounds_ + base_slot,
+            result.brick_bounds.data(),
+            result.brick_bounds.size() * sizeof(BrickBounds),
             cudaMemcpyHostToDevice);
     }
 

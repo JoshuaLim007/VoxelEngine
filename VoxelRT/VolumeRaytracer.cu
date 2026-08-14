@@ -683,7 +683,7 @@ void VoxelRaytracer3D::UploadDistanceField(const uint8_t* df, size_t count)
 // all GPU voxel memory; VoxelRaytracer3D will not free those pointers.
 // ---------------------------------------------------------------------------
 void VoxelRaytracer3D::BindStreamingResources(
-    uint32_t* d_pool_data, uint32_t* d_indices,
+    uint32_t* d_pool_data, uint32_t* d_indices, BrickBounds* d_brick_bounds,
     uint32_t  brick_words, uint32_t  brick_dim,
     uint8_t*  d_dist_field,
     uint32_t* d_lowres_bits,
@@ -702,6 +702,7 @@ void VoxelRaytracer3D::BindStreamingResources(
     // --- Bind BrickPool (external; BrickPoolData/Indices tracked as null → Free() skips) ---
     gpu_BrickPool.data        = d_pool_data;
     gpu_BrickPool.indices     = d_indices;
+    gpu_BrickPool.bounds      = d_brick_bounds;
     gpu_BrickPool.brick_words = brick_words;
     gpu_BrickPool.brick_dim   = brick_dim;
     gpu_DistField             = d_dist_field;
@@ -802,20 +803,20 @@ __device__ bool RaytraceFast(int maxSteps, float3 origin, float3 ray,
 
     // Helper lambda (expressed as a macro to avoid CUDA lambda pitfalls):
     // Advances outer DDA one step, updating cx/cy/cz, tmx/tmy/tmz, hitNormal.
-#define DDA_OUTER_STEP()                                       \
-    do {                                                        \
-        ++total;                                               \
+#define DDA_OUTER_STEP()                                      \
+    {                                                         \
+        ++total;                                              \
         if (tmx < tmy && tmx < tmz) {                         \
-            cx += sx; tmx += tdx;                              \
+            cx += sx; tmx += tdx;                             \
             hitNormal = make_float3((float)sx, 0.0f, 0.0f);   \
-        } else if (tmy <= tmx && tmy < tmz) {                  \
-            cy += sy; tmy += tdy;                              \
+        } else if (tmy <= tmx && tmy < tmz) {                 \
+            cy += sy; tmy += tdy;                             \
             hitNormal = make_float3(0.0f, (float)sy, 0.0f);   \
-        } else {                                               \
-            cz += sz; tmz += tdz;                              \
+        } else {                                              \
+            cz += sz; tmz += tdz;                             \
             hitNormal = make_float3(0.0f, 0.0f, (float)sz);   \
-        }                                                      \
-    } while(0)
+        }                                                     \
+    }
 
     for (int step = 0; step < maxSteps; ++step)
     {
@@ -854,6 +855,23 @@ __device__ bool RaytraceFast(int maxSteps, float3 origin, float3 ray,
                 const uint32_t* brickData =
                     bricks.data + (size_t)brickSlot * bricks.brick_words;
 
+                const BrickBounds bounds = bricks.bounds[brickSlot];
+                const float invBrickDim = 1.0f / fbd;
+                const float3 boundsMin = make_float3(
+                    (float)cx + (float)bounds.min_x * invBrickDim,
+                    (float)cy + (float)bounds.min_y * invBrickDim,
+                    (float)cz + (float)bounds.min_z * invBrickDim);
+                const float3 boundsMax = make_float3(
+                    (float)cx + (float)(bounds.max_x + 1u) * invBrickDim,
+                    (float)cy + (float)(bounds.max_y + 1u) * invBrickDim,
+                    (float)cz + (float)(bounds.max_z + 1u) * invBrickDim);
+                if (!RayIntersectsAABB(make_float3(ox, oy, oz), ray,
+                    boundsMin, boundsMax, nullptr, nullptr))
+                {
+                    DDA_OUTER_STEP();
+                    continue;
+                }
+
                 // ---- Compute ray entry time into current outer cell ----
                 // At this point in the DDA, tmx/tmy/tmz hold the t-values of
                 // the NEXT boundary for each axis.  tmx - tdx is the t when the
@@ -890,8 +908,9 @@ __device__ bool RaytraceFast(int maxSteps, float3 origin, float3 ray,
                 // correct boundary normal rather than (0,0,0).
                 float3 innerNormal = hitNormal;
                 bool innerHit = false;
-
-                for (int is = 0; is < 512; ++is)
+                constexpr int maxInnerSteps = 512; // sanity limit to avoid infinite loops
+                int is = 0;
+                for (; is < maxInnerSteps; ++is)
                 {
                     if ((unsigned)bx >= (unsigned)bd ||
                         (unsigned)by >= (unsigned)bd ||
@@ -913,7 +932,6 @@ __device__ bool RaytraceFast(int maxSteps, float3 origin, float3 ray,
                         hitPos.y = (oy + globalT * dy) * (float)factor;
                         hitPos.z = (oz + globalT * dz) * (float)factor;
                         hitNormal = innerNormal;
-                        total += is;
                         innerHit = true;
                         break;
                     }
@@ -931,6 +949,7 @@ __device__ bool RaytraceFast(int maxSteps, float3 origin, float3 ray,
                     }
                 }
 
+                total += is;
                 if (innerHit) { hit = true; goto done; }
             }
             // Occupied chunk with UINT32_MAX slot means it's marked occupied in the
