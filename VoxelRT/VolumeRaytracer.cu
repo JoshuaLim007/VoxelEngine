@@ -865,8 +865,9 @@ __device__ bool RaytraceFast(int maxSteps, float3 origin, float3 ray,
                     (float)cx + (float)(bounds.max_x + 1u) * invBrickDim,
                     (float)cy + (float)(bounds.max_y + 1u) * invBrickDim,
                     (float)cz + (float)(bounds.max_z + 1u) * invBrickDim);
+                float3 boundsEntry;
                 if (!RayIntersectsAABB(make_float3(ox, oy, oz), ray,
-                    boundsMin, boundsMax, nullptr, nullptr))
+                    boundsMin, boundsMax, &boundsEntry, nullptr))
                 {
                     DDA_OUTER_STEP();
                     continue;
@@ -880,6 +881,16 @@ __device__ bool RaytraceFast(int maxSteps, float3 origin, float3 ray,
                 // (negative means the ray started inside the grid already).
                 float tEntry = fmaxf(fmaxf(tmx - tdx, tmy - tdy), tmz - tdz);
                 tEntry = fmaxf(tEntry, 0.0f);
+
+                float boundsEntryT = 0.0f;
+                if (dx != 0.0f) {
+                    boundsEntryT = (boundsEntry.x - ox) / dx;
+                } else if (dy != 0.0f) {
+                    boundsEntryT = (boundsEntry.y - oy) / dy;
+                } else {
+                    boundsEntryT = (boundsEntry.z - oz) / dz;
+                }
+                tEntry = fmaxf(tEntry, boundsEntryT);
 
                 // ---- Brick-local ray start in [0, bd) ----
                 float blx = (ox + tEntry * dx - (float)cx) * fbd;
