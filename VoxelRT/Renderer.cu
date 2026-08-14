@@ -1,7 +1,7 @@
 #include "Renderer.cuh"
 #include "cuda_noise.cuh"
 using namespace GPUDDA;
-#define DEBUG_VIEW
+//#define DEBUG_VIEW
 constexpr bool ENABLE_CHECKERBOARD_RENDER = true;
 
 struct RenderParams
@@ -111,7 +111,7 @@ __device__ float3 calculateColor(float3 camPos, float3 normal, float3 position, 
 	{
 		float3 viewDir = normalize(camPos - position);          // surface → camera
 		float3 reflectDir = reflect(-g_env.LightDirection, normal); // incident = light→surface
-		float spec = powf(fmaxf(dot(viewDir, reflectDir), 0), 32);
+		float spec = powf(fmaxf(dot(viewDir, reflectDir), 0), 32) * 8;
 		color.x += spec * g_env.LightColor.x;
 		color.y += spec * g_env.LightColor.y;
 		color.z += spec * g_env.LightColor.z;

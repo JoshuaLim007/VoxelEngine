@@ -53,9 +53,9 @@ namespace GPUDDA {
 // ============================================================
 // World / chunk dimension constants
 // ============================================================
-constexpr uint32_t STREAM_WORLD_VOXEL_X  = 4096 * 2;
-constexpr uint32_t STREAM_WORLD_VOXEL_Y  = 512 * 2;
-constexpr uint32_t STREAM_WORLD_VOXEL_Z  = 4096 * 2;
+constexpr uint32_t STREAM_WORLD_VOXEL_X  = 4096;
+constexpr uint32_t STREAM_WORLD_VOXEL_Y  = 512;
+constexpr uint32_t STREAM_WORLD_VOXEL_Z  = 4096;
 
 // brick_dim must match the factor used in the renderer (32)
 constexpr uint32_t STREAM_BRICK_DIM      = 32;

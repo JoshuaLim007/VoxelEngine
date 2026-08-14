@@ -866,12 +866,14 @@ __device__ bool RaytraceFast(int maxSteps, float3 origin, float3 ray,
                     (float)cy + (float)(bounds.max_y + 1u) * invBrickDim,
                     (float)cz + (float)(bounds.max_z + 1u) * invBrickDim);
                 float3 boundsEntry;
+                float3 boundsNormal;
                 if (!RayIntersectsAABB(make_float3(ox, oy, oz), ray,
-                    boundsMin, boundsMax, &boundsEntry, nullptr))
+                    boundsMin, boundsMax, &boundsEntry, &boundsNormal))
                 {
                     DDA_OUTER_STEP();
                     continue;
                 }
+				hitNormal = boundsNormal;
 
                 // ---- Compute ray entry time into current outer cell ----
                 // At this point in the DDA, tmx/tmy/tmz hold the t-values of

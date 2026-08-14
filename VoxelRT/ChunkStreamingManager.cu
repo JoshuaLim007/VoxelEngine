@@ -109,9 +109,9 @@ inline float repeaterPerlin(float px, float py, float pz,
 float ManhattanChunkScoringPolicy::Score(const ChunkKey& camera_sc,
                                          const ChunkKey& candidate_sc) const {
     const int dx = std::abs(static_cast<int>(candidate_sc.x) - static_cast<int>(camera_sc.x));
-    const int dy = std::abs(static_cast<int>(candidate_sc.y) - static_cast<int>(camera_sc.y));
+    //const int dy = std::abs(static_cast<int>(candidate_sc.y) - static_cast<int>(camera_sc.y));
     const int dz = std::abs(static_cast<int>(candidate_sc.z) - static_cast<int>(camera_sc.z));
-    const int manhattan = dx + dy + dz;
+    const int manhattan = dx + 0 + dz;
     // Higher score means more urgent. Add 1 to avoid divide-by-zero at camera chunk.
     return 1.0f / static_cast<float>(manhattan + 1);
 }
@@ -227,13 +227,6 @@ void ChunkStreamingManager::UpdateCamera(float3 cam_pos, float3 cam_fwd) {
     const int sc_cx = static_cast<int>(cam_pos.x / SC_VOXEL_DIM);
     const int sc_cy = static_cast<int>(cam_pos.y / SC_VOXEL_DIM);
     const int sc_cz = static_cast<int>(cam_pos.z / SC_VOXEL_DIM);
-
-    if (sc_cx < 0 || sc_cy < 0 || sc_cz < 0 ||
-        static_cast<uint32_t>(sc_cx) >= WORLD_SC_X ||
-        static_cast<uint32_t>(sc_cy) >= WORLD_SC_Y ||
-        static_cast<uint32_t>(sc_cz) >= WORLD_SC_Z) {
-        return;
-    }
 
     const ChunkKey cam_sc{static_cast<uint16_t>(sc_cx),
                           static_cast<uint16_t>(sc_cy),
