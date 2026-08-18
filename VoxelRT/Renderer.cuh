@@ -8,8 +8,9 @@
 #include <iostream>
 #include "helper_math.h"
 #include "VolumeRaytracer.cuh"
+#include "VariableRegistry.h"
 
-//#define DEBUG_VIEW
+#define DEBUG_VIEW
 //#define ORTHO
 
 #define CUDA_SAFE_CALL(x) { \
@@ -43,6 +44,8 @@ namespace GPUDDA
 		void SetFOV(float fov);
 
 		void SetOrthoWindowSize(float2 windowSize);
+
+		void EnableFloatingOrigin(bool enable, float3 minFloatingOriginBounds, float3 maxFloatingOriginBounds);
 
 		void RenderScreen(
 			VoxelRaytracer3D* rt,

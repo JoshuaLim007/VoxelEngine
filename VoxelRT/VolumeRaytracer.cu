@@ -12,6 +12,10 @@
 
 namespace GPUDDA
 {
+
+DEVICE_VARIABLE(int3, brickVoxelIndexOffset)
+
+
 __device__ __host__ BitRef::operator bool() const
 {
     return (*byte >> index) & 1;
@@ -826,7 +830,14 @@ __device__ bool RaytraceFast(int maxSteps, float3 origin, float3 ray,
             (unsigned)cz >= (unsigned)lD)
             break;
 
-        const uint32_t chunkIdx = GetSampleIndex(cx, cy, cz, lW, lH);
+		int tcx = cx + brickVoxelIndexOffset.x * invFactor;
+		int tcy = cy + brickVoxelIndexOffset.y * invFactor;
+		int tcz = cz + brickVoxelIndexOffset.z * invFactor;
+		tcx = wrap(tcx, lW);
+		tcy = wrap(tcy, lH);
+		tcz = wrap(tcz, lD);
+
+        const uint32_t chunkIdx = GetSampleIndex(tcx, tcy, tcz, lW, lH);
         const bool occupied = ((gridRaw[chunkIdx >> 5] >> (chunkIdx & 31)) & 1u) != 0;
 
         if (!occupied)

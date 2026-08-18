@@ -18,6 +18,9 @@
     <CudaCompile Include="cuda_noise.cu">
       <Filter>Source Files</Filter>
     </CudaCompile>
+    <CudaCompile Include="ChunkStreamingManager.cu">
+      <Filter>Source Files</Filter>
+    </CudaCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="VolumeRaytracer.cuh">
@@ -35,5 +38,16 @@
     <ClInclude Include="cuda_noise.cuh">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="VariableRegistry.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ChunkStreamingManager.cuh">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="VariableRegistry.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

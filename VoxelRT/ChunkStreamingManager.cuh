@@ -86,7 +86,7 @@ constexpr uint32_t MAX_POOL_BRICKS       =
 
 // Camera-relative render distance in world voxels.
 // Scheduling/filtering is done in super-chunk coordinates derived from this.
-constexpr float    STREAM_LOAD_RADIUS      = 1024.0f * 2;
+constexpr float    STREAM_LOAD_RADIUS = 1024;
 constexpr int      STREAM_RENDER_RADIUS_SC =
     static_cast<int>(STREAM_LOAD_RADIUS / static_cast<float>(SC_VOXEL_DIM));
 

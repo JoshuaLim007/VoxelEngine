@@ -4,6 +4,8 @@
 #include "SDLRenderer.h"
 #include <SDL.h>
 #include <functional>
+#include <chrono>
+
 #undef main
 
 Renderer::Renderer(std::string title) : title(title)
@@ -45,14 +47,16 @@ void Renderer::Close()
 {
     closing = true;
 }
-bool Renderer::Render()
+bool Renderer::Render(double& frameTime)
 {
+    auto t0 = std::chrono::high_resolution_clock::now();
 
     bool quit = false;
     void *pixels;
     int pitch = 0;
     SDL_LockTexture(tex, NULL, &pixels, &pitch);
-    CallbackData data;
+    CallbackData data{};
+    data.deltaTime = lastFrameTime;
     data.renderer = this;
     data.pixels = reinterpret_cast<PixelData *>(pixels);
     for (auto &callback : callbacks)
@@ -63,6 +67,11 @@ bool Renderer::Render()
     SDL_Rect destRect = {0, 0, w, h};
     SDL_RenderCopy(renderer, tex, NULL, &destRect);
     SDL_RenderPresent(renderer);
+
+    auto t1 = std::chrono::high_resolution_clock::now();
+    auto td = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() / (1000.0 * 1000.0);
+    lastFrameTime = td;
+    frameTime = lastFrameTime;
 
     return !closing;
 }

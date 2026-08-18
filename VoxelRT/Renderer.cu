@@ -1,5 +1,7 @@
 #include "Renderer.cuh"
 #include "cuda_noise.cuh"
+#include "helper_math.h"
+
 using namespace GPUDDA;
 //#define DEBUG_VIEW
 constexpr bool ENABLE_CHECKERBOARD_RENDER = true;
@@ -21,8 +23,37 @@ struct RenderParams
 	{
 	}
 };
-__device__ RenderParams dFrameInfo;
+
 RenderParams hFrameInfo = RenderParams(make_uint2(0, 0), 0, 90, make_float2(10, 10));
+
+DEVICE_VARIABLE(RenderParams, dFrameInfo)
+DEVICE_VARIABLE(GPUDDA::Graphics::Environment, g_env)
+
+bool floatingOriginEnabled = false;
+float3 minFloatingOriginBounds = make_float3(0, 0, 0);
+float3 maxFloatingOriginBounds = make_float3(0, 0, 0);
+
+int3 floatingOriginVoxelOffset(float3 origin) {
+	float xWidth = maxFloatingOriginBounds.x - minFloatingOriginBounds.x;
+	float yWidth = maxFloatingOriginBounds.y - minFloatingOriginBounds.y;
+	float zWidth = maxFloatingOriginBounds.z - minFloatingOriginBounds.z;
+	return make_int3(static_cast<int>(floorf(origin.x / xWidth) * xWidth),
+		static_cast<int>(floorf(origin.y / yWidth) * yWidth),
+		static_cast<int>(floorf(origin.z / zWidth) * zWidth));
+}
+
+float3 floatingOrigin(float3 origin) {
+	origin.x = wrapf(origin.x, minFloatingOriginBounds.x, maxFloatingOriginBounds.x);
+	origin.y = wrapf(origin.y, minFloatingOriginBounds.y, maxFloatingOriginBounds.y);
+	origin.z = wrapf(origin.z, minFloatingOriginBounds.z, maxFloatingOriginBounds.z);
+	return origin;
+}
+
+void Graphics::EnableFloatingOrigin(bool enable, float3  _minFloatingOriginBounds, float3 _maxFloatingOriginBounds) {
+	floatingOriginEnabled = enable;
+	minFloatingOriginBounds = _minFloatingOriginBounds;
+	maxFloatingOriginBounds = _maxFloatingOriginBounds;
+}
 
 __host__ __device__ void Graphics::GetDirections(float3 eularAngles, float3* forwad, float3* up, float3* right)
 {
@@ -86,7 +117,6 @@ __device__ void setPixelColor(void* screen_texture, uint32_t screen_width, uint3
 	pixel->a = 255;
 }
 
-__device__ Graphics::Environment g_env;
 __device__ float3 calculateColor(float3 camPos, float3 normal, float3 position, VoxelBuffer3D* chunks,
 	VoxelBuffer3D* chunksData, Bounds3Df* chunkBoundingBoxes, int factor,
 	int& out_steps)
@@ -175,6 +205,8 @@ __device__ float3 Tonemap(float3 color)
 	tonemappedColor.z = fminf(fmaxf(tonemappedColor.z, 0), 1);
 	return tonemappedColor;
 }
+
+DEVICE_VARIABLE(float3, constantOriginOffset)
 
 __global__ void screenDispatch(float3 origin, float3 camera_fwd, float3 camera_up, float3 camera_right,
 	void* screen_texture, VoxelBuffer3D* chunks, VoxelBuffer3D* chunksData, Bounds3Df* chunkBoundingBoxes, int factor)
@@ -271,6 +303,8 @@ __global__ void screenDispatch(float3 origin, float3 camera_fwd, float3 camera_u
 __global__ void screenDispatchFast(float3 origin, float3 camera_fwd, float3 camera_up, float3 camera_right,
 	void* screen_texture, VoxelBuffer3D* chunks, BrickPool bricks, const uint8_t* distField, int factor)
 {
+	origin += constantOriginOffset;
+
 	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	int y = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -303,17 +337,18 @@ __global__ void screenDispatchFast(float3 origin, float3 camera_fwd, float3 came
 	if (hit)
 	{
 #ifdef DEBUG_VIEW
-		float dist = length(hitPos - origin);
-		float3 hp = hitPos;
-		hp.x = fmodf(hp.x / 128.0f, 1.0f + FLT_EPS_DDA);
-		hp.y = fmodf(hp.y / 128.0f, 1.0f + FLT_EPS_DDA);
-		hp.z = fmodf(hp.z / 128.0f, 1.0f + FLT_EPS_DDA);
-		if      (x < screen_width>>1 && y < screen_height>>1)
-			setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(normal.x, normal.y, normal.z));
-		else if (x >= screen_width>>1 && y < screen_height>>1)
-			setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(hp.x, hp.y, hp.z));
-		else if (x >= screen_width>>1)
-			setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(dist * 0.01f, 0, 0));
+		//float dist = length(hitPos - origin);
+		//float3 hp = hitPos;
+		//hp.x = fmodf(hp.x / 128.0f, 1.0f + FLT_EPS_DDA);
+		//hp.y = fmodf(hp.y / 128.0f, 1.0f + FLT_EPS_DDA);
+		//hp.z = fmodf(hp.z / 128.0f, 1.0f + FLT_EPS_DDA);
+		//if      (x < screen_width>>1 && y < screen_height>>1)
+		//	setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(normal.x, normal.y, normal.z));
+		//else if (x >= screen_width>>1 && y < screen_height>>1)
+		//	setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(hp.x, hp.y, hp.z));
+		//else if (x >= screen_width>>1)
+		//	setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(dist * 0.01f, 0, 0));
+		setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(normal.x, normal.y, normal.z));
 #else
 		int color_steps = 0;
 		float3 color = calculateColor(origin, normal, hitPos, chunks,
@@ -329,17 +364,33 @@ __global__ void screenDispatchFast(float3 origin, float3 camera_fwd, float3 came
 	}
 
 #ifdef DEBUG_VIEW
-	if (x < screen_width>>1 && y > screen_height>>1)
-		setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(steps / 256.0f, 0, 0));
+	//if (x < screen_width>>1 && y > screen_height>>1)
+	//	setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(steps / 256.0f, 0, 0));
+	//setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(normal.x, normal.y, normal.z));
 #endif
 }
 
+#include "Logger.h"
 void Graphics::RenderScreenFast(VoxelRaytracer3D* rt, uint32_t screen_width, uint32_t screen_height,
 	void* d_screen_texture, float3 origin, float3 camera_fwd, float3 camera_up,
 	float3 camera_right)
 {
 	hFrameInfo.Resolution = make_uint2(screen_width, screen_height);
-	cudaMemcpyToSymbol(dFrameInfo, &hFrameInfo, sizeof(RenderParams));
+	
+
+	if (floatingOriginEnabled) {
+		Logger::getInstance().write("Camera Position", std::to_string(origin.x) + ", " + std::to_string(origin.y) + ", " + std::to_string(origin.z));
+		int3 offset = floatingOriginVoxelOffset(origin);
+		GetGlobalRegistry().set("brickVoxelIndexOffset", offset);
+		origin = floatingOrigin(origin);
+		Logger::getInstance().write("World offset", std::to_string(offset.x) + ", " + std::to_string(offset.y) + ", " + std::to_string(offset.z));
+	}
+
+	//Logger::getInstance().write(1, std::to_string(origin.x) + ", " + std::to_string(origin.y) + ", " + std::to_string(origin.z));
+
+	int3 offset = make_int3(0, 0, 0);
+	GetGlobalRegistry()
+		.set("dFrameInfo", hFrameInfo);
 
 	uint32_t dispatch_h = screen_height;
 	if (ENABLE_CHECKERBOARD_RENDER) dispatch_h >>= 1;
@@ -361,19 +412,7 @@ void Graphics::RenderScreenFast(VoxelRaytracer3D* rt, uint32_t screen_width, uin
 
 void Graphics::SetEnvironment(const Environment& env_v)
 {
-	void* d_env;
-	cudaGetSymbolAddress(&d_env, g_env);
-	auto err = cudaGetLastError();
-	if (err != cudaSuccess)
-	{
-		std::cout << "Error: " << cudaGetErrorString(err) << std::endl;
-	}
-	cudaMemcpy(d_env, &env_v, sizeof(Environment), cudaMemcpyHostToDevice);
-	err = cudaGetLastError();
-	if (err != cudaSuccess)
-	{
-		std::cout << "Error: " << cudaGetErrorString(err) << std::endl;
-	}
+	GetGlobalRegistry().set("g_env", env_v);
 }
 
 void Graphics::SetFOV(float fov)
@@ -391,7 +430,10 @@ void Graphics::RenderScreen(VoxelRaytracer3D* rt, uint32_t screen_width, uint32_
 	float3 camera_right)
 {
 	hFrameInfo.Resolution = make_uint2(screen_width, screen_height);
-	cudaMemcpyToSymbol(dFrameInfo, &hFrameInfo, sizeof(RenderParams));
+	int3 offset = make_int3(0, 0, 0);
+	GetGlobalRegistry()
+		.set("dFrameInfo", hFrameInfo);
+
 	if (ENABLE_CHECKERBOARD_RENDER) {
 		screen_height = screen_height >> 1;
 	}

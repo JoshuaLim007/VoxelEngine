@@ -14,13 +14,23 @@
 #include <thread>
 #include <mutex>
 #include <algorithm>
+#include "VariableRegistry.h"
 
-#define SAMPLE_MODE_TILED_LINEAR
-//#define SAMPLE_MODE_MORTON
+//#define SAMPLE_MODE_TILED_LINEAR
+#define SAMPLE_MODE_MORTON
 
 constexpr auto FLT_EPS_DDA = 1e-6;
 constexpr auto FLT_INF = std::numeric_limits<float>::infinity();
 constexpr auto FLT_EPS = std::numeric_limits<float>::epsilon();
+
+#define wrap(x, n) ((x % n) + n) % n
+
+inline float wrapf(float value, float min, float max)
+{
+	const float range = max - min;
+	return min + std::fmod(std::fmod(value - min, range) + range, range);
+}
+
 
 namespace GPUDDA {
 	__device__ __host__ inline uint32_t Part1By2(uint32_t x)
@@ -309,6 +319,7 @@ namespace GPUDDA {
 		DDARayResults<float3>& Results
 	);
 
+	[[deprecated("Use RaytraceFast instead")]]
 	__device__ bool Raytrace(int maxSteps, float3 origin, float3 ray, VoxelBuffer3D chunks, VoxelBuffer3D* chunksData, Bounds3Df* chunkBoundingBoxes, int factor,
 		int& out_steps, float3& out_normal, float3& out_hit);
 
@@ -330,11 +341,11 @@ namespace GPUDDA {
 		RayTraceResults<float3> resultsCPU = RayTraceResults<float3>(0);
 
 		// GPU resources
-		float3* d_results;
-		float3* d_results_normal;
-		int* d_results_steps;
-		float3* d_origins;
-		float3* d_rays;
+		float3* d_results = nullptr;
+		float3* d_results_normal = nullptr;
+		int* d_results_steps = nullptr;
+		float3* d_origins = nullptr;
+		float3* d_rays = nullptr;
 		int factor = 1;
 
 		// GPU resources

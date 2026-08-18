@@ -224,9 +224,9 @@ void ChunkStreamingManager::UpdateCamera(float3 cam_pos, float3 cam_fwd) {
     (void)cam_fwd;
 
     // Camera super-chunk position
-    const int sc_cx = static_cast<int>(cam_pos.x / SC_VOXEL_DIM);
-    const int sc_cy = static_cast<int>(cam_pos.y / SC_VOXEL_DIM);
-    const int sc_cz = static_cast<int>(cam_pos.z / SC_VOXEL_DIM);
+    const int sc_cx = WORLD_SC_X / 2;// static_cast<int>(cam_pos.x / SC_VOXEL_DIM);
+    const int sc_cy = WORLD_SC_Y / 2;//static_cast<int>(cam_pos.y / SC_VOXEL_DIM);
+    const int sc_cz = WORLD_SC_Z / 2;//static_cast<int>(cam_pos.z / SC_VOXEL_DIM);
 
     const ChunkKey cam_sc{static_cast<uint16_t>(sc_cx),
                           static_cast<uint16_t>(sc_cy),
