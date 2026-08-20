@@ -21,6 +21,7 @@
     <ClInclude Include="ChunkStreamingManager.cuh" />
     <ClInclude Include="cuda_noise.cuh" />
     <ClInclude Include="VariableRegistry.h" />
+    <ClInclude Include="VirtualMap.h" />
     <ClInclude Include="VolumeRaytracer.cuh" />
     <ClInclude Include="helper_math.h" />
     <ClInclude Include="Renderer.cuh" />

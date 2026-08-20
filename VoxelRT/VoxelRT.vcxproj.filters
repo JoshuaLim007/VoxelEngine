@@ -44,6 +44,9 @@
     <ClInclude Include="ChunkStreamingManager.cuh">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="VirtualMap.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="VariableRegistry.cpp">

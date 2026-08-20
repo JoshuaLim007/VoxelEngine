@@ -1,4 +1,8 @@
 #include "ChunkStreamingManager.cuh"
+#include "VirtualMap.h"
+#include "Logger.h"
+#undef min
+#undef max
 
 #include <algorithm>
 #include <cassert>
@@ -121,7 +125,8 @@ float ManhattanChunkScoringPolicy::Score(const ChunkKey& camera_sc,
 // ============================================================
 
 ChunkStreamingManager::ChunkStreamingManager()
-    : scoring_policy_(std::make_unique<ManhattanChunkScoringPolicy>()) {}
+    : scoring_policy_(std::make_unique<ManhattanChunkScoringPolicy>()), virtualMap({ WORLD_SC_X , WORLD_SC_Y, WORLD_SC_Z }) {
+}
 
 ChunkStreamingManager::~ChunkStreamingManager() {
     // Shut down worker threads
@@ -219,18 +224,51 @@ void ChunkStreamingManager::Init(VoxelRaytracer3D* raytracer, uint32_t brick_wor
               << (pool_bytes / (1024 * 1024)) << " MB pool\n";
 }
 
+bool ChunkStreamingManager::IsWithinStreamBounds(const ChunkKey& key, const ChunkKey& sc) const {
+    const int half_sc_x = static_cast<int>(WORLD_SC_X / 2);
+    const int half_sc_y = static_cast<int>(WORLD_SC_Y / 2);
+    const int half_sc_z = static_cast<int>(WORLD_SC_Z / 2);
+
+	auto sc_cx = static_cast<int>(sc.x);
+	auto sc_cy = static_cast<int>(sc.y);
+	auto sc_cz = static_cast<int>(sc.z);
+
+	int key_x = static_cast<int>(key.x);
+	int key_y = static_cast<int>(key.y);
+	int key_z = static_cast<int>(key.z);
+
+    int pos_bound_x = sc_cx + half_sc_x;
+    int neg_bound_x = sc_cx - half_sc_x;
+    int pos_bound_y = sc_cy + half_sc_y;
+    int neg_bound_y = sc_cy - half_sc_y;
+    int pos_bound_z = sc_cz + half_sc_z;
+    int neg_bound_z = sc_cz - half_sc_z;
+
+    if (key_x >= pos_bound_x || key_x < neg_bound_x ||
+        key_z >= pos_bound_z || key_z < neg_bound_z) {
+        return false;
+    }
+    return true;
+}
+
 // ============================================================
 void ChunkStreamingManager::UpdateCamera(float3 cam_pos, float3 cam_fwd) {
     (void)cam_fwd;
 
     // Camera super-chunk position
-    const int sc_cx = WORLD_SC_X / 2;// static_cast<int>(cam_pos.x / SC_VOXEL_DIM);
-    const int sc_cy = WORLD_SC_Y / 2;//static_cast<int>(cam_pos.y / SC_VOXEL_DIM);
-    const int sc_cz = WORLD_SC_Z / 2;//static_cast<int>(cam_pos.z / SC_VOXEL_DIM);
+	const int half_sc_x = static_cast<int>(WORLD_SC_X / 2);
+	const int half_sc_y = static_cast<int>(WORLD_SC_Y / 2);
+	const int half_sc_z = static_cast<int>(WORLD_SC_Z / 2);
 
-    const ChunkKey cam_sc{static_cast<uint16_t>(sc_cx),
-                          static_cast<uint16_t>(sc_cy),
-                          static_cast<uint16_t>(sc_cz)};
+    const int sc_cx = half_sc_x + static_cast<int>(cam_pos.x / SC_VOXEL_DIM);
+    const int sc_cy = half_sc_y + static_cast<int>(cam_pos.y / SC_VOXEL_DIM);
+    const int sc_cz = half_sc_z + static_cast<int>(cam_pos.z / SC_VOXEL_DIM);
+	Logger::getInstance().write("Streaming Camera", "Camera SC: (", sc_cx, ", ", sc_cy, ", ", sc_cz, ")");
+    Logger::getInstance().write("Streaming", "Loaded: ", loaded_.size(), ", Building: ", building_.size(), ", In-flight: ", in_flight_.size(), ", Queued: ", build_queue_.size());
+
+    const ChunkKey cam_sc{static_cast<ChunkKeyType>(sc_cx),
+                          static_cast<ChunkKeyType>(sc_cy),
+                          static_cast<ChunkKeyType>(sc_cz)};
 
     {
         std::lock_guard<std::mutex> lk(cam_mutex_);
@@ -256,14 +294,14 @@ void ChunkStreamingManager::UpdateCamera(float3 cam_pos, float3 cam_fwd) {
         }
     }
 
-    // Evict loaded chunks that are now outside render distance.
-    // This is the only steady-state eviction policy.
+	// Evict loaded chunks that are now outside of the virtual map bounds.
     {
         std::vector<ChunkKey> to_evict;
         to_evict.reserve(loaded_.size());
         for (const auto& kv : loaded_) {
-            if (!IsWithinRenderDistance(kv.first, cam_sc)) {
-                to_evict.push_back(kv.first);
+            const ChunkKey& key = kv.first;
+            if (!IsWithinStreamBounds(key, cam_sc)) {
+                to_evict.push_back(key);
             }
         }
         for (const auto& key : to_evict) {
@@ -275,26 +313,20 @@ void ChunkStreamingManager::UpdateCamera(float3 cam_pos, float3 cam_fwd) {
     const int sc_radius = STREAM_RENDER_RADIUS_SC;
 
     std::vector<BuildRequest> candidates;
-    for (int dz = -sc_radius; dz <= sc_radius; ++dz) {
-        for (int dy = -sc_radius; dy <= sc_radius; ++dy) {
-            for (int dx = -sc_radius; dx <= sc_radius; ++dx) {
-                const int sx = sc_cx + dx, sy = sc_cy + dy, sz = sc_cz + dz;
-                if (sx < 0 || sy < 0 || sz < 0) continue;
-                if (static_cast<uint32_t>(sx) >= WORLD_SC_X ||
-                    static_cast<uint32_t>(sy) >= WORLD_SC_Y ||
-                    static_cast<uint32_t>(sz) >= WORLD_SC_Z) continue;
+    for (int dz = -half_sc_z; dz < half_sc_z; ++dz) {
+        for (int dy = -half_sc_y; dy < half_sc_y; ++dy) {
+            for (int dx = -half_sc_x; dx < half_sc_x; ++dx) {
+                const int sx = sc_cx + dx, sy = half_sc_y + dy, sz = sc_cz + dz;
 
-                const ChunkKey key{ static_cast<uint16_t>(sx),
-                                    static_cast<uint16_t>(sy),
-                                    static_cast<uint16_t>(sz) };
+                const ChunkKey key{ static_cast<ChunkKeyType>(sx),
+                                    static_cast<ChunkKeyType>(sy),
+                                    static_cast<ChunkKeyType>(sz) };
 
                 if (loaded_.count(key)) continue;
                 {
                     std::lock_guard<std::mutex> lk(in_flight_mutex_);
                     if (in_flight_.count(key)) continue;
                 }
-
-                if (!IsWithinRenderDistance(key, cam_sc)) continue;
 
                 candidates.push_back({key, ChunkPriority(cam_sc, key)});
             }
@@ -337,9 +369,11 @@ void ChunkStreamingManager::UpdateCamera(float3 cam_pos, float3 cam_fwd) {
                     if (already_in_flight) continue;
 
                     const float weakest_building = build_scores[target_idx];
-                    if (cand.priority > weakest_building) {
+					bool is_within_bounds = IsWithinStreamBounds(cand.key, cam_sc);
+                    if (cand.priority > weakest_building || !is_within_bounds) {
                         // Cancel one currently building chunk that is at or below
                         // the weakest score bucket.
+                        // Cancel builds that are now outside of stream bounds too
                         ChunkKey to_cancel{};
                         bool found = false;
                         {
@@ -406,7 +440,7 @@ bool ChunkStreamingManager::FlushUploads(VoxelRaytracer3D* /*raytracer*/) {
     }
 
     for (auto& r : results) {
-        if (!IsWithinRenderDistance(r.key, cam_sc)) {
+        if (!IsWithinStreamBounds(r.key, cam_sc)) {
             continue;
         }
         IntegrateResult(r);
@@ -637,9 +671,10 @@ void ChunkStreamingManager::IntegrateResult(const ChunkBuildResult& result) {
     }
 
     // Update pinned indices, packed lr_bits, and occupancy for each brick in this SC
-    const uint32_t bx0 = result.key.x * SC_BRICK_DIM;
-    const uint32_t by0 = result.key.y * SC_BRICK_DIM;
-    const uint32_t bz0 = result.key.z * SC_BRICK_DIM;
+    auto phys_slot = virtualMap.GetPhysicalSlot({ static_cast<int>(result.key.x), static_cast<int>(result.key.y), static_cast<int>(result.key.z)});
+    const uint32_t bx0 = phys_slot[0] * SC_BRICK_DIM;
+    const uint32_t by0 = phys_slot[1] * SC_BRICK_DIM;
+    const uint32_t bz0 = phys_slot[2] * SC_BRICK_DIM;
 
     {
         std::lock_guard<std::mutex> occ_lk(occ_mutex_);
@@ -691,9 +726,10 @@ void ChunkStreamingManager::EvictChunk(const ChunkKey& key) {
     const LoadedSC& lc = it->second;
     if (lc.brick_count > 0) FreeContig(lc.base_slot, lc.brick_count);
 
-    const uint32_t bx0 = key.x * SC_BRICK_DIM;
-    const uint32_t by0 = key.y * SC_BRICK_DIM;
-    const uint32_t bz0 = key.z * SC_BRICK_DIM;
+    auto phys_slot = virtualMap.GetPhysicalSlot({ static_cast<int>(key.x), static_cast<int>(key.y), static_cast<int>(key.z) });
+    const uint32_t bx0 = phys_slot[0] * SC_BRICK_DIM;
+    const uint32_t by0 = phys_slot[1] * SC_BRICK_DIM;
+    const uint32_t bz0 = phys_slot[2] * SC_BRICK_DIM;
 
     {
         std::lock_guard<std::mutex> occ_lk(occ_mutex_);

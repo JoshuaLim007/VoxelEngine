@@ -365,7 +365,7 @@ __global__ void screenDispatchFast(float3 origin, float3 camera_fwd, float3 came
 
 #ifdef DEBUG_VIEW
 	//if (x < screen_width>>1 && y > screen_height>>1)
-	//	setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(steps / 256.0f, 0, 0));
+	setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(steps / 256.0f, 0, 0));
 	//setPixelColor(screen_texture, screen_width, screen_height, x, y, make_float3(normal.x, normal.y, normal.z));
 #endif
 }

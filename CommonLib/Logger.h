@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <sstream>
 #include <stdexcept>
+#include <mutex>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -44,7 +45,7 @@ private:
 
     std::chrono::steady_clock::time_point lastFlush =
         std::chrono::steady_clock::now();
-
+	std::mutex write_lock;
 public:
 
     static Logger& getInstance()
@@ -85,6 +86,7 @@ public:
     template <typename... Args>
     void write(const std::string& label, Args&&... args)
     {
+		std::lock_guard<std::mutex> lock(write_lock);
         if (!enabled)
             return;
 

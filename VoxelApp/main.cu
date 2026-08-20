@@ -31,7 +31,7 @@ int main()
     streamingMgr.Init(raytracer, brick_words);
 
     void *d_pixels;
-    float3 cam_pos     = {0, 0, 0};
+    float3 cam_pos     = {0, 400, 0};
     float3 cam_up      = {0, 1, 0};
     float3 cam_right   = {1, 0, 0};
     float3 cam_forward = {0, 0, 1};
@@ -117,11 +117,11 @@ int main()
         }
         if (keyboard.held(SDL_SCANCODE_Q))
         {
-            cam_pos -= cam_up * cam_speed;
+            cam_pos -= make_float3(0,1,0) * cam_speed;
         }
         if (keyboard.held(SDL_SCANCODE_E))
         {
-            cam_pos += cam_up * cam_speed;
+            cam_pos += make_float3(0, 1, 0) * cam_speed;
         }
 
         //std::cout << "Cam pos: " << cam_pos.x << ", " << cam_pos.y << ", " << cam_pos.z << std::endl;

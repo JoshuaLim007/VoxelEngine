@@ -47,6 +47,7 @@
 
 #include <cuda_runtime.h>
 #include "VolumeRaytracer.cuh"
+#include "VirtualMap.h"
 
 namespace GPUDDA {
 
@@ -100,9 +101,9 @@ constexpr uint32_t MAX_WORKER_THREADS    = 4;
 // ============================================================
 // Structs
 // ============================================================
-
+#define ChunkKeyType uint16_t
 struct ChunkKey {
-    uint16_t x, y, z;
+    ChunkKeyType x, y, z;
     bool operator==(const ChunkKey& o) const {
         return x == o.x && y == o.y && z == o.z;
     }
@@ -179,6 +180,7 @@ public:
     uint32_t  BrickWords()         const { return brick_words_;      }
 
 private:
+    VirtualMap<3> virtualMap;
     // ---- Worker thread ----
     void WorkerThread();
     ChunkBuildResult BuildChunk(const ChunkKey& key);
@@ -188,6 +190,7 @@ private:
     void EvictChunk(const ChunkKey& key);
     void UploadGPUState();
     bool IsWithinRenderDistance(const ChunkKey& key, const ChunkKey& cam_sc) const;
+    bool IsWithinStreamBounds(const ChunkKey& key, const ChunkKey& cam_sc) const;
     bool IsBuildCancelled(const ChunkKey& key);
     void RequestBuildCancel(const ChunkKey& key);
 
